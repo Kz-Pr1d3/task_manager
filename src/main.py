@@ -1,5 +1,8 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
+from src.api.auth import auth_router
 from src.core.config import configs
 
 
@@ -14,8 +17,7 @@ class AppCreator:
             version="1.0.0",
         )
 
-        # self.app.include_router()
-        # self.app.add_middleware()
+        self.app.include_router(router=auth_router)
         # self.app.add_exception_handler()
 
 

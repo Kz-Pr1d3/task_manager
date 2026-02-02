@@ -12,6 +12,7 @@ class Configs(BaseSettings):
     database_url: str
     secret_key: str
     debug: bool = False
+    session_key: str
 
 
 configs = Configs()

@@ -18,6 +18,20 @@ class AppCreator:
         )
 
         self.app.include_router(router=auth_router)
+        self.app.add_middleware(
+            middleware_class=CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"]
+        )
+        self.app.add_middleware(
+            middleware_class=SessionMiddleware,
+            secret_key=configs.session_key,
+            session_cookie="SESSION_ID",
+            same_site="strict",
+            https_only=True,
+        )
         # self.app.add_exception_handler()
 
 

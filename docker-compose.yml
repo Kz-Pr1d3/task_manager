@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: task_manager_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: task_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/data:/var/lib/postgresql/data
+      - ./db/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    network_mode: "host"
+#    ports:
+#      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheusdata:/prometheus

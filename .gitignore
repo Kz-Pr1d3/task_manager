@@ -32,6 +32,15 @@ htmlcov/
 *.swp
 *.swo
 
+# Keys
+keys/
+
+# Database
+db/data/
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Prometheus
+prometheusdata/

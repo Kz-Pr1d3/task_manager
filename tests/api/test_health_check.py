@@ -1,5 +1,3 @@
-
-
 def test__health_check__success(client):
     response = client.get("/health")
 

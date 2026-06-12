@@ -13,6 +13,14 @@ class Configs(BaseSettings):
     secret_key: str
     debug: bool = False
     session_key: str
+    private_key_password: str
+    private_key_path: str
+    public_key_path: str
+
+    enable_tracing: bool = False
+    backend_service_name: str = "my-backend"
+
+    enable_metrics: bool = False
 
 
 configs = Configs()

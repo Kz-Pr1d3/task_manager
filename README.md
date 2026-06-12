@@ -16,6 +16,22 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
+## Database
+
+```bash
+# Запуск
+docker compose up -d
+
+# Остановка
+docker compose down
+
+# Остановка + удаление данных (чистый старт)
+docker compose down -v && rm -rf db/data && docker compose up -d
+
+# Зайти в psql внутри контейнера
+docker exec -it task_manager_db psql -U user -d task_manager
+```
+
 ## Run
 
 ```bash

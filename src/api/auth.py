@@ -1,6 +1,7 @@
 from fastapi import APIRouter, status
 
-from src.models.auth import SignUpRequest, TokenResponse, SignInRequest
+from src.models.auth import RefreshRequest, SignInRequest, SignUpRequest, TokenResponse
+from src.services.dependencies import AuthServiceDep
 
 auth_router = APIRouter(prefix="/auth")
 
@@ -12,8 +13,8 @@ auth_router = APIRouter(prefix="/auth")
     status_code=status.HTTP_200_OK,
     response_model=TokenResponse,
 )
-async def sign_up(credentials: SignUpRequest):
-    pass
+async def sign_up(credentials: SignUpRequest, service: AuthServiceDep):
+    return await service.create_user(credentials=credentials)
 
 
 @auth_router.post(
@@ -23,8 +24,8 @@ async def sign_up(credentials: SignUpRequest):
     status_code=status.HTTP_200_OK,
     response_model=TokenResponse,
 )
-async def sign_in(credentials: SignInRequest):
-    pass
+async def sign_in(credentials: SignInRequest, service: AuthServiceDep):
+    return await service.sign_in(credentials=credentials)
 
 
 @auth_router.post(
@@ -34,5 +35,16 @@ async def sign_in(credentials: SignInRequest):
     status_code=status.HTTP_200_OK,
     response_model=TokenResponse,
 )
-async def refresh():
+async def refresh(request: RefreshRequest, service: AuthServiceDep):
+    return await service.refresh(refresh_token=request)
+
+
+@auth_router.post(
+    "/logout",
+    tags=["Auth"],
+    summary="Чистка пользовательской сессии",
+    status_code=status.HTTP_200_OK,
+    response_model=TokenResponse,
+)
+async def logout():
     pass

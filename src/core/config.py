@@ -22,5 +22,7 @@ class Configs(BaseSettings):
 
     enable_metrics: bool = False
 
+    redis_url: str = "redis://localhost:6379/0"
+
 
 configs = Configs()

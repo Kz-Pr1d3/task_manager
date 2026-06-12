@@ -1,3 +1,4 @@
+import redis.asyncio as redis
 from fastapi import HTTPException, status
 
 from src.core.security import Security, hash_password, verify_password
@@ -7,8 +8,9 @@ from src.repository.user import UserRepository
 
 
 class AuthService:
-    def __init__(self, repository: UserRepository):
+    def __init__(self, repository: UserRepository, redis_client: redis.Redis):
         self.repository = repository
+        self.redis = redis_client
 
     async def create_user(self, credentials: SignUpRequest) -> TokenResponse:
         hashed_password = hash_password(credentials.password)
@@ -16,7 +18,13 @@ class AuthService:
             email=credentials.email,
             password=hashed_password,
         )
-        access_token, refresh_token = await Security.create_tokens(user_id=user.id)
+        access_token, refresh_token = Security.create_tokens(user_id=user.id)
+        await Security.store_refresh_token(
+            user_id=user["id"],
+            token=refresh_token,
+            redis_client=self.redis,
+        )
+
         return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
     async def sign_in(self, credentials: SignInRequest) -> TokenResponse:
@@ -27,11 +35,23 @@ class AuthService:
         if not verify_password(plain=credentials.password, hashed=user.password):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
 
-        access_token, refresh_token = await Security.create_tokens(user_id=user.id)
+        access_token, refresh_token = Security.create_tokens(user_id=user.id)
+        await Security.store_refresh_token(
+            user_id=user["id"],
+            token=refresh_token,
+            redis_client=self.redis,
+        )
+
         return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
     async def refresh(self, refresh_token: str) -> TokenResponse:
-        user_id = await Security.decode_refresh_token(refresh_token)
+        user_id = await Security.decode_refresh_token(token=refresh_token, redis_client=self.redis)
 
-        access_token, refresh_token = await Security.create_tokens(user_id=user_id)
+        access_token, refresh_token = Security.create_tokens(user_id=user_id)
+        await Security.store_refresh_token(
+            user_id=user_id,
+            token=refresh_token,
+            redis_client=self.redis,
+        )
+
         return TokenResponse(access_token=access_token, refresh_token=refresh_token)

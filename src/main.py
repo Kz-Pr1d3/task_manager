@@ -1,11 +1,13 @@
 from contextlib import asynccontextmanager
 
+import redis.asyncio as redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.api.auth import auth_router
+from src.core import cache
 from src.core.config import configs
 from src.core.database import db
 from src.middleware.logging import LoggingMiddleware
@@ -19,8 +21,17 @@ async def app_lifespan(app: FastAPI):
         setup_tracing(configs.backend_service_name)
 
     await db.connect()
+
+    pool = redis.ConnectionPool.from_url(configs.redis_url)
+    cache.redis_client = redis.Redis.from_pool(pool)
+    await cache.redis_client.ping()
+
     yield
+
     await db.disconnect()
+
+    if cache.redis_client:
+        await cache.redis_client.aclose()
 
 
 class AppCreator:

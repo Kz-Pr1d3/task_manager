@@ -1,0 +1,52 @@
+---
+alwaysApply: true
+---
+
+## База данных
+
+- PostgreSQL 17 (alpine), запускается через `docker compose up -d`
+- Контейнер: `task_manager_db`, порт `5432`
+- Креды: user/password, БД: `task_manager`
+- DDL: `db/scripts/init.sql`
+- Данные: `db/data/` (bind mount, в .gitignore)
+- Драйвер: `asyncpg` (без ORM)
+
+### Таблицы
+
+**users**
+| Колонка | Тип | Описание |
+|---|---|---|
+| id | SERIAL PK | |
+| email | VARCHAR(255) UNIQUE NOT NULL | логин пользователя |
+| password | VARCHAR(255) NOT NULL | argon2 хеш |
+| created_at | TIMESTAMPTZ DEFAULT now() | |
+
+**lists** (вариант B: системные + пользовательские в одной таблице)
+| Колонка | Тип | Описание |
+|---|---|---|
+| id | SERIAL PK | |
+| user_id | INT NULL FK users | NULL для inbox |
+| type | VARCHAR(20) | `inbox`, `user` |
+| name | VARCHAR(255) | |
+| position | INT NULL | порядок user-списков |
+| created_at | TIMESTAMPTZ | |
+
+Seed: `id=1` Inbox.
+
+**tasks**
+| Колонка | Тип | Описание |
+|---|---|---|
+| id | SERIAL PK | |
+| user_id | INT NOT NULL FK users | |
+| list_id | INT NOT NULL FK lists | |
+| parent_id | INT NULL FK tasks | подзадачи |
+| previous_list_id | INT NULL | без FK (list мог быть hard-deleted); только trash |
+| title | VARCHAR(50) NOT NULL | |
+| description | TEXT | |
+| priority | VARCHAR(10) NULL | `low`/`medium`/`high` |
+| due_date | TIMESTAMPTZ NULL | |
+| status | VARCHAR(20) | `active`/`completed` |
+| deleted_at | TIMESTAMPTZ NULL | soft delete («не буду делать» = trash) |
+| created_at / updated_at / completed_at | TIMESTAMPTZ | |
+
+Индексы и CHECK-ограничения — в `db/scripts/init.sql`. Детали пагинации/views — [tasks_tech.md](../development_plans/tasks_tech.md).

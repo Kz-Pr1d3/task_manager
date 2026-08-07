@@ -1,7 +1,13 @@
 import pytest
 from starlette.testclient import TestClient
 
+from src.core.keys import Keys
 from src.main import app
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _load_jwt_keys() -> None:
+    Keys.load_keys()
 
 
 @pytest.fixture
@@ -18,3 +24,13 @@ def select_three_rows() -> str:
         (3, 'Петр', 22)
     ) AS users(id, name, age);
     """
+
+
+@pytest.fixture
+def test_user_id() -> int:
+    return 1
+
+
+@pytest.fixture
+def test_user_email() -> str:
+    return "test_user@test.com"

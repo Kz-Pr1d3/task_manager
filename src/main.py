@@ -7,9 +7,11 @@ from prometheus_client import make_asgi_app
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.api.auth import auth_router
+from src.api.v1.router import v1_router
 from src.core import cache
 from src.core.config import configs
 from src.core.database import db
+from src.core.keys import Keys
 from src.middleware.logging import LoggingMiddleware
 from src.middleware.metrics import MetricsMiddleware
 from src.middleware.tracing import TracingMiddleware, setup_tracing
@@ -20,6 +22,7 @@ async def app_lifespan(app: FastAPI):
     if configs.enable_tracing:
         setup_tracing(configs.backend_service_name)
 
+    Keys.load_keys()
     await db.connect()
 
     pool = redis.ConnectionPool.from_url(configs.redis_url)
@@ -73,6 +76,9 @@ class AppCreator:
         if configs.enable_metrics:
             metrics_app = make_asgi_app()
             self.app.mount("/metrics", metrics_app)
+
+        self.app.include_router(router=auth_router)
+        self.app.include_router(router=v1_router)
 
 
 app_creator = AppCreator(lifespan=app_lifespan)

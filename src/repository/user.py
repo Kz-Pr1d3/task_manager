@@ -16,7 +16,7 @@ class UserRepository(BaseRepository):
             return self.user_model(**row)
 
     async def get_by_id(self, user_id: int) -> User | None:
-        query = "SELECT id, email FROM users WHERE id = $1"
+        query = "SELECT id, email, password, created_at FROM users WHERE id = $1"
         row = await self.one(query, user_id)
         if row is not None:
             return self.user_model(**row)

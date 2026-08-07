@@ -155,31 +155,264 @@ class TaskRepository(BaseRepository):
         set_query = ", ".join(cols)
 
         query = f"""
-            UPDATE tasks SET {set_query} 
-            WHERE user_id = $1 and id = $2 
-            RETURNING id
+            UPDATE tasks SET {set_query}, updated_at = now()
+            WHERE user_id = $1 AND id = $2
+            RETURNING *
         """
-        row = await self.one(query, *values, user_id, task_id)
+        row = await self.one(query, user_id, task_id, *values)
         if row is not None:
             return self.task_model(**row)
 
-    async def move_task(self, user_id: int, task_id: int, list_id: int) -> Task | None:
-        ...
+    async def move_task(
+            self,
+            user_id: int,
+            task_id: int,
+            list_id: int,
+            *,
+            limit: int,
+    ) -> Task | None:
+        """Перемещает задачу и прямых потомков в другой список.
+
+        Атомарно: lock → задача не в trash → list writable →
+        ``target_cnt + subtree_cnt <= limit`` → UPDATE ``list_id``
+        (root + ``parent_id = root``). ``previous_list_id`` не трогаем.
+        ``None`` = задача/список недоступны **или** лимит.
+        """
+        lock_key = zlib.crc32(f"{user_id}:{list_id}".encode()) & 0x7FFFFFFF
+        query = """
+            WITH _lock AS (
+                SELECT pg_advisory_xact_lock($1, $2)
+            ),
+            src AS (
+                SELECT id, list_id
+                FROM tasks
+                WHERE user_id = $3 AND id = $4 AND deleted_at IS NULL
+            ),
+            list_ok AS (
+                SELECT id FROM lists
+                WHERE id = $5
+                  AND (
+                      type = 'inbox'
+                      OR (type = 'user' AND user_id = $3)
+                  )
+            ),
+            subtree AS (
+                SELECT COUNT(*)::int AS cnt
+                FROM tasks
+                WHERE user_id = $3
+                  AND deleted_at IS NULL
+                  AND (id = $4 OR parent_id = $4)
+            ),
+            target_stats AS (
+                SELECT COUNT(*)::int AS cnt
+                FROM tasks
+                WHERE user_id = $3 AND list_id = $5 AND deleted_at IS NULL
+            ),
+            moved AS (
+                UPDATE tasks t
+                SET list_id = list_ok.id,
+                    updated_at = now()
+                FROM src, list_ok, subtree, target_stats, _lock
+                WHERE t.user_id = $3
+                  AND (t.id = src.id OR t.parent_id = src.id)
+                  AND src.list_id IS DISTINCT FROM $5
+                  AND target_stats.cnt + subtree.cnt <= $6
+                RETURNING t.*
+            )
+            SELECT * FROM moved WHERE id = $4
+        """
+        row = await self.one(
+            query,
+            self._TASKS_LOCK_NS,
+            lock_key,
+            user_id,
+            task_id,
+            list_id,
+            limit,
+        )
+        if row is not None:
+            return self.task_model(**row)
 
     async def complete_task(self, user_id: int, task_id: int) -> Task | None:
-        ...
+        """Завершает задачу и прямых потомков; auto-complete родителя.
+
+        Root + ``parent_id = root`` → status=completed, completed_at=now().
+        Если завершили подзадачу и все siblings completed — родитель тоже.
+        :param user_id: владелец.
+        :param task_id: задача (корень или подзадача).
+        :returns: обновлённая задача или None если не найдена.
+        """
+        async with self.transaction() as conn:
+            rows = await conn.fetch(
+                """
+                UPDATE tasks
+                SET status = 'completed',
+                    completed_at = COALESCE(completed_at, now()),
+                    updated_at = now()
+                WHERE user_id = $1
+                  AND (id = $2 OR parent_id = $2)
+                RETURNING *
+                """,
+                user_id,
+                task_id,
+            )
+            if not rows:
+                return None
+
+            root = next(row for row in rows if row["id"] == task_id)
+
+            if root["parent_id"] is not None:
+                await conn.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'completed',
+                        completed_at = COALESCE(completed_at, now()),
+                        updated_at = now()
+                    WHERE id = $2
+                      AND user_id = $1
+                      AND NOT EXISTS (
+                          SELECT 1 FROM tasks
+                          WHERE parent_id = $2
+                            AND user_id = $1
+                            AND deleted_at IS NULL
+                            AND status <> 'completed'
+                      )
+                    """,
+                    user_id,
+                    root["parent_id"],
+                )
+
+            return self.task_model(**root)
 
     async def trash_task(self, user_id: int, task_id: int) -> Task | None:
-        ...
+        """Soft delete: previous_list_id + deleted_at для root и потомков.
 
-    async def restore_task(self, user_id: int, task_id: int) -> Task | None:
-        ...
+        :param user_id: владелец.
+        :param task_id: корень каскада.
+        :returns: обновлённый root или None если не найден.
+        """
+        query = """
+            WITH updated AS (
+                UPDATE tasks
+                SET previous_list_id = list_id,
+                    deleted_at = now(),
+                    updated_at = now()
+                WHERE user_id = $1
+                  AND (id = $2 OR parent_id = $2)
+                RETURNING *
+            )
+            SELECT * FROM updated WHERE id = $2
+        """
+        row = await self.one(query, user_id, task_id)
+        if row is not None:
+            return self.task_model(**row)
+
+    async def restore_task(
+            self,
+            user_id: int,
+            task_id: int,
+            list_id: int,
+            *,
+            limit: int,
+    ) -> Task | None:
+        """Restore из корзины в ``list_id`` с проверкой лимита.
+
+        Атомарно: lock → задача в trash → count + subtree ≤ limit →
+        deleted_at=NULL, list_id=target для root и потомков.
+        ``None`` = нет в trash / не найдена / лимит.
+        :param user_id: владелец.
+        :param task_id: корень каскада.
+        :param list_id: целевой физический список.
+        :param limit: макс. задач в списке.
+        :returns: восстановленный root или None.
+        """
+        lock_key = zlib.crc32(f"{user_id}:{list_id}".encode()) & 0x7FFFFFFF
+        query = """
+            WITH _lock AS (
+                SELECT pg_advisory_xact_lock($1, $2)
+            ),
+            root AS (
+                SELECT id
+                FROM tasks
+                WHERE user_id = $3 AND id = $4 AND deleted_at IS NOT NULL
+            ),
+            stats AS (
+                SELECT COUNT(*)::int AS cnt
+                FROM tasks
+                WHERE user_id = $3 AND list_id = $5 AND deleted_at IS NULL
+            ),
+            subtree AS (
+                SELECT COUNT(*)::int AS cnt
+                FROM tasks t
+                JOIN root ON TRUE
+                WHERE t.user_id = $3
+                  AND (t.id = root.id OR t.parent_id = root.id)
+            ),
+            updated AS (
+                UPDATE tasks t
+                SET deleted_at = NULL,
+                    list_id = $5,
+                    updated_at = now()
+                FROM root, stats, subtree, _lock
+                WHERE t.user_id = $3
+                  AND (t.id = root.id OR t.parent_id = root.id)
+                  AND stats.cnt + subtree.cnt <= $6
+                RETURNING t.*
+            )
+            SELECT * FROM updated WHERE id = $4
+        """
+        row = await self.one(
+            query,
+            self._TASKS_LOCK_NS,
+            lock_key,
+            user_id,
+            task_id,
+            list_id,
+            limit,
+        )
+        if row is not None:
+            return self.task_model(**row)
 
     async def hard_delete_task(self, user_id: int, task_id: int) -> bool:
-        ...
+        """Hard delete root + потомков; только из корзины.
+
+        :param user_id: владелец.
+        :param task_id: корень каскада.
+        :returns: True если root удалён, иначе False.
+        """
+        query = """
+            DELETE FROM tasks
+            WHERE user_id = $1
+              AND deleted_at IS NOT NULL
+              AND (id = $2 OR parent_id = $2)
+            RETURNING id
+        """
+        rows = await self.query(query, user_id, task_id)
+        return any(row["id"] == task_id for row in rows)
 
     async def get_subtasks(self, user_id: int, parent_id: int) -> list[Task]:
-        ...
+        """Возвращает неудалённые подзадачи родителя.
+
+        :param user_id: владелец задач.
+        :param parent_id: id родительской задачи.
+        :returns: подзадачи в порядке создания.
+        """
+        query = """
+            SELECT * FROM tasks
+            WHERE user_id = $1
+              AND parent_id = $2
+              AND deleted_at IS NULL
+            ORDER BY created_at ASC, id ASC
+        """
+        rows = await self.query(query, user_id, parent_id)
+        return [self.task_model(**row) for row in rows]
 
     async def count_tasks_in_list(self, user_id: int, list_id: int) -> int:
-        ...
+        """Число неудалённых задач пользователя в списке."""
+        query = """
+            SELECT COUNT(*)::int AS cnt
+            FROM tasks
+            WHERE user_id = $1 AND list_id = $2 AND deleted_at IS NULL
+        """
+        row = await self.one(query, user_id, list_id)
+        return int(row["cnt"])

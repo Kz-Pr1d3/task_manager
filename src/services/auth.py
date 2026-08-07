@@ -1,6 +1,5 @@
 import redis.asyncio as redis
-from fastapi import HTTPException, status
-
+from src.core.exceptions import UnauthorizedException
 from src.core.security import Security, hash_password, verify_password
 from src.models.auth import SignInRequest, SignUpRequest, TokenResponse
 from src.models.user import User
@@ -20,7 +19,7 @@ class AuthService:
         )
         access_token, refresh_token = Security.create_tokens(user_id=user.id)
         await Security.store_refresh_token(
-            user_id=user["id"],
+            user_id=user.id,
             token=refresh_token,
             redis_client=self.redis,
         )
@@ -30,14 +29,14 @@ class AuthService:
     async def sign_in(self, credentials: SignInRequest) -> TokenResponse:
         user: User = await self.repository.get_by_email(email=credentials.email)
         if not user:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
+            raise UnauthorizedException(detail="Invalid credentials")
 
         if not verify_password(plain=credentials.password, hashed=user.password):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
+            raise UnauthorizedException(detail="Invalid credentials")
 
         access_token, refresh_token = Security.create_tokens(user_id=user.id)
         await Security.store_refresh_token(
-            user_id=user["id"],
+            user_id=user.id,
             token=refresh_token,
             redis_client=self.redis,
         )

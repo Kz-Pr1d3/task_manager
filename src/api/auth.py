@@ -1,3 +1,4 @@
+from fastapi import Request
 from fastapi import APIRouter, status
 
 from src.models.auth import RefreshRequest, SignInRequest, SignUpRequest, TokenResponse
@@ -13,8 +14,10 @@ auth_router = APIRouter(prefix="/auth")
     status_code=status.HTTP_200_OK,
     response_model=TokenResponse,
 )
-async def sign_up(credentials: SignUpRequest, service: AuthServiceDep):
-    return await service.create_user(credentials=credentials)
+async def sign_up(credentials: SignUpRequest, service: AuthServiceDep, request: Request):
+    tokens = await service.create_user(credentials=credentials)
+    request.session["refresh"] = tokens["refresh_token"]
+    return tokens
 
 
 @auth_router.post(

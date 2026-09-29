@@ -10,20 +10,22 @@
 
 | Компонент | Статус | Путь / заметки |
 |-----------|--------|----------------|
-| DDL lists/tasks + индексы + seed | ✅ | `init.sql`: seed только Inbox; status `active`/`completed` |
-| Models: `Task`, `UpdateTaskRequest`, enums | ✅ | `src/models/tasks.py`, `enums.py` |
+| DDL lists/tasks + индексы + seed | ✅ | `init.sql`: seed только Inbox; status `active`/`completed`; `parent_id` reserved (post-MVP) |
+| Models: `Task`, `TaskPage`, `UpdateTaskRequest`, enums | ✅ | `src/models/tasks.py`, `enums.py` |
 | Models: lists CRUD schemas | ✅ | `src/models/lists.py` |
-| `ListRepository` get/create/rename/reorder | ✅ | reorder с каскадом позиций; delete — stub |
-| `TaskRepository` | ✅ | get/list/create/update/move/lifecycle/subtasks/count |
-| `ListService` CRUD (без delete) | ✅ | лимит 5 → `409` (`ConflictException`) |
-| `TaskService` | ✅ | get/list/create/update/move/lifecycle/subtasks |
-| API lists | ✅ частично | GET/POST `/v1/lists/`, PATCH rename/reorder; DELETE stub |
-| API tasks | ✅ | GET/POST `/v1/tasks/`; GET/PATCH/DELETE `/{id}`; move/complete/trash/restore/subtasks |
+| `ListRepository` get/create/rename/reorder/delete | ✅ | reorder + delete с каскадом позиций; delete → trash+Inbox |
+| `TaskRepository` | ✅ | get/list/create/update/move/lifecycle/count (без subtasks) |
+| `ListService` CRUD | ✅ | лимит 5 → `409`; delete → `404` если нет |
+| `TaskService` | ✅ | get/list/create/update/move/lifecycle (без subtasks) |
+| API lists | ✅ | GET/POST `/v1/lists/`; PATCH rename/reorder; DELETE `/{id}` |
+| API tasks | ✅ | GET/POST `/v1/tasks/`; GET/PATCH/DELETE `/{id}`; move/complete/trash/restore |
 | API views | ❌ | нет |
 | API create-via-view | ❌ | `/views/today|next7/tasks` |
+| Cursor pagination (физ. списки) | ✅ | `list_tasks` + `TaskPage` |
 | DI wiring | ✅ | `repository/dependencies.py`, `services/dependencies.py`, `v1/router.py` |
+| Тесты tasks/lists | ✅ частично | repo lifecycle/list(+delete)/move/create/update; service move; API — только health |
 
-**Этап:** tasks_router done. Next: delete list → views.
+**Этап:** MVP без сабтасков. Next: views → API-тесты.
 
 **Расхождения API с ранним черновиком (как в коде сейчас):**
 
@@ -34,6 +36,7 @@
 | prefix `/api/v1` | prefix `/v1` (без `/api`) |
 | лимит списков → 409 | ✅ create → `409` |
 | `GET/POST /lists/{id}/tasks` | `GET/POST /tasks/` (`list_id` query/body); код в `tasks.py` + `TaskService` |
+| Подзадачи в MVP | **Снято** — post-MVP |
 
 ---
 
@@ -41,21 +44,21 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Физический list_id  — ровно один на задачу (корень/лист)   │
+│  Физический list_id  — ровно один на задачу                 │
 │  Виртуальные views   — query по due_date, status, deleted_at│
 │  previous_list_id    — только для restore из trash          │
 │  deleted_at          — ортогонален status (completed+trash) │
 │  completed           — статус, list_id НЕ меняется          │
 │  «не буду делать»    — soft delete в корзину                │
+│  MVP                 — плоские задачи, без parent_id        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 1. Задача без `deleted_at` может одновременно быть в физическом списке и в N virtual views.
 2. Задача с `deleted_at` видна **только** в `/views/trash`.
 3. `due_date` / `status` не влияют на `list_id`.
-4. Подзадача всегда имеет тот же `list_id`, что родитель (синхронизация при move).
-5. Лимит 100 считается по `(user_id, list_id)` включая подзадачи.
-6. Физических системных списков — только Inbox.
+4. Лимит 100 считается по `(user_id, list_id)`.
+5. Физических системных списков — только Inbox.
 
 ---
 
@@ -87,7 +90,7 @@ CREATE UNIQUE INDEX lists_system_type_unique
 
 ALTER TABLE lists ADD CONSTRAINT lists_user_type_check CHECK (
   (type = 'inbox' AND user_id IS NULL)
-  OR (type = 'user' AND user_id IS NOT NULL)
+    OR (type = 'user' AND user_id IS NOT NULL)
 );
 ```
 
@@ -126,7 +129,7 @@ INSERT INTO lists (id, user_id, type, name) VALUES
 | id | SERIAL PK | |
 | user_id | INT NOT NULL FK users | |
 | list_id | INT NOT NULL FK lists | |
-| parent_id | INT NULL FK tasks | |
+| parent_id | INT NULL FK tasks | **reserved, post-MVP**; в MVP всегда NULL, не используется |
 | previous_list_id | INT NULL | **без FK** (user list мог быть hard-deleted); только trash |
 | title | VARCHAR(50) NOT NULL | |
 | description | TEXT | |
@@ -138,14 +141,15 @@ INSERT INTO lists (id, user_id, type, name) VALUES
 | updated_at | TIMESTAMPTZ | |
 | completed_at | TIMESTAMPTZ NULL | |
 
-**Индексы (минимум):**
+**Индексы (MVP):**
 
 - `(user_id, list_id)` WHERE deleted_at IS NULL — лимит 100
-- `(user_id, list_id, created_at, id)` WHERE parent_id IS NULL AND deleted_at IS NULL — пагинация списков
-- `(user_id, due_date, id)` WHERE deleted_at IS NULL AND status = 'active' AND parent_id IS NULL — views today/next7
-- `(user_id, completed_at DESC, id DESC)` WHERE deleted_at IS NULL AND parent_id IS NULL AND status = 'completed' — completed
-- `(user_id, deleted_at DESC, id DESC)` WHERE deleted_at IS NOT NULL AND parent_id IS NULL — trash
-- `(parent_id)` — каскады
+- `(user_id, list_id, created_at, id)` WHERE deleted_at IS NULL — пагинация списков
+- `(user_id, due_date, id)` WHERE deleted_at IS NULL AND status = 'active' — views today/next7
+- `(user_id, completed_at DESC, id DESC)` WHERE deleted_at IS NULL AND status = 'completed' — completed
+- `(user_id, deleted_at DESC, id DESC)` WHERE deleted_at IS NOT NULL — trash
+
+> Post-MVP: вернуть `AND parent_id IS NULL` в partial indexes списков/views + индекс `(parent_id)` для каскадов.
 
 ### Ограничение 5 user-списков
 
@@ -198,7 +202,7 @@ WHERE user_id = :uid
 
 Префикс: `/v1` (роутер `v1_router`). Все endpoints требуют auth (`Bearer`).
 
-Легенда: ✅ сделано · 🟡 stub/частично · ❌ не начато
+Легенда: ✅ сделано · 🟡 stub/частично · ❌ не начато · ⛔ out of MVP
 
 ### Lists (пользовательские)
 
@@ -208,7 +212,7 @@ WHERE user_id = :uid
 | `/lists/` | POST | ✅ | Создать (лимит 5 → 409); body `{name}` |
 | `/lists/{id}/rename` | PATCH | ✅ | `{name}` |
 | `/lists/{id}/reorder` | PATCH | ✅ | `{position}` (1..N); каскад соседних позиций |
-| `/lists/{id}` | DELETE | 🟡 | Hard delete → задачи в корзину (stub) |
+| `/lists/{id}` | DELETE | ✅ | Hard delete; задачи → trash + `list_id`→Inbox; компакт позиций |
 
 ### Tasks
 
@@ -221,9 +225,9 @@ Lists router — только CRUD списков, без nested `/lists/{id}/ta
 | `/tasks/` | POST | ✅ | Создать; body `{list_id, title, due_date?}` |
 | `/tasks/{id}` | GET | ✅ | Одна задача |
 | `/tasks/{id}` | PATCH | ✅ | title/description/priority/due_date (`exclude_unset`) |
-| `/tasks/{id}/move` | POST | ✅ | `{list_id}` — явный move + каскад подзадач; subtask → 422 |
-| `/tasks/{id}/complete` | POST | ✅ | Complete + каскад (`list_id` без изменений) |
-| `/tasks/{id}/trash` | POST | ✅ | Soft delete + previous_list_id + каскад |
+| `/tasks/{id}/move` | POST | ✅ | `{list_id}` — явный move одной задачи |
+| `/tasks/{id}/complete` | POST | ✅ | Complete (`list_id` без изменений) |
+| `/tasks/{id}/trash` | POST | ✅ | Soft delete + previous_list_id |
 | `/tasks/{id}/restore` | POST | ✅ | Restore из корзины |
 | `/tasks/{id}` | DELETE | ✅ | Hard delete (только если в корзине) → иначе 422 |
 
@@ -244,15 +248,6 @@ Lists router — только CRUD списков, без nested `/lists/{id}/ta
 \* второй параметр cursor — только при составной сортировке, см. [Пагинация](#пагинация-cursor--lazy-load).
 
 `GET /tasks/?list_id=` — те же `limit`, `cursor`, `cursor_created_at`.
-
-### Subtasks
-
-| Endpoint | Метод | Статус | Описание |
-|----------|-------|--------|----------|
-| `/tasks/{id}/subtasks` | GET | ✅ | Список подзадач |
-| `/tasks/{id}/subtasks` | POST | ✅ | Создать подзадачу (title) |
-
-Подзадача наследует `list_id`, `user_id`; `due_date` = NULL.
 
 ### Create через view (удобные alias)
 
@@ -278,15 +273,15 @@ Lists router — только CRUD списков, без nested `/lists/{id}/ta
   "due_date": "2026-06-17T00:00:00+03:00",
   "status": "active",
   "list_id": 10,
-  "parent_id": null,
   "previous_list_id": null,
   "deleted_at": null,
   "created_at": "...",
   "updated_at": "...",
-  "completed_at": null,
-  "subtasks_count": 2
+  "completed_at": null
 }
 ```
+
+MVP: без `parent_id`, без `subtasks_count`.
 
 ### Pagination
 
@@ -302,7 +297,7 @@ Lists router — только CRUD списков, без nested `/lists/{id}/ta
 ```
 
 - `next_cursor` — **id последней задачи в `items`**, не арифметика `cursor + limit`.
-- `has_more = (len(items) == limit)`.
+- Сервис запрашивает `limit+1`, режет до `limit`; `has_more = (len(fetched) > limit)` (как notifications). Иначе на последней странице ровно из `limit` элементов был бы ложный `has_more=true`.
 - Если `has_more = false` → `next_cursor = null`.
 - `total` не возвращаем (дорогой `COUNT(*)`; для lazy load не нужен).
 
@@ -325,13 +320,15 @@ Keyset pagination для infinite scroll. **Offset не используем.**
 
 ### Инварианты
 
-1. В выборке только **корневые задачи**: `parent_id IS NULL`.
+1. В MVP выборка — все задачи контекста (иерархии нет).
 2. `tasks.id` — `SERIAL` (integer), монотонно растёт глобально, но в выборке пользователя id **не непрерывны**.
-3. `next_cursor` всегда берётся из **фактического последнего элемента ответа**:
+3. `next_cursor` всегда берётся из **фактического последнего элемента ответа** после trim:
 
 ```python
-has_more = len(items) == limit
-next_cursor = items[-1].id if has_more else None
+rows = await repo.list_tasks(..., limit=limit + 1, ...)
+has_more = len(rows) > limit
+items = rows[:limit]
+next_cursor = items[-1].id if has_more and items else None
 ```
 
 4. Следующий запрос: `cursor = next_cursor` (+ companion-поле при составной сортировке).
@@ -345,7 +342,6 @@ next_cursor = items[-1].id if has_more else None
 ```sql
 WHERE user_id = :uid
   AND list_id = :list_id
-  AND parent_id IS NULL
   AND deleted_at IS NULL
 ORDER BY created_at ASC, id ASC
 LIMIT :limit
@@ -389,13 +385,7 @@ LIMIT :limit
 
 ### Почему `next_cursor ≠ cursor + limit`
 
-Пример: `cursor=145`, `limit=20`. В ответе могут быть id `150, 152, 158, … 198` — между ними дыры (задачи других users, других list_id, подзадачи, удалённые). `next_cursor = 198`, не `165`.
-
-### Подзадачи в ответе
-
-Вариант A (рекомендуется для MVP): `items` — только корни; подзадачи в `GET /tasks/{id}` или `GET /tasks/{id}/subtasks`.
-
-Вариант B: вложить `subtasks[]` в каждый root (без пагинации подзадач; их обычно мало).
+Пример: `cursor=145`, `limit=20`. В ответе могут быть id `150, 152, 158, … 198` — между ними дыры (задачи других users, других list_id, удалённые). `next_cursor = 198`, не `165`.
 
 ### Пример flow (физический список)
 
@@ -416,34 +406,33 @@ LIMIT :limit
 
 ### Move task
 
-1. Проверить лимит 100 в целевом списке (+ все подзадачи).
-2. UPDATE `tasks SET list_id = :new WHERE id = :root OR parent_id = :root`.
+1. Проверить лимит 100 в целевом списке.
+2. UPDATE `tasks SET list_id = :new WHERE id = :id`.
 3. Не трогать `previous_list_id` (только trash).
 
 ### Soft delete (trash)
 
 1. `previous_list_id = current list_id` (перезаписывать).
-2. `deleted_at = now()` для root + descendants.
+2. `deleted_at = now()`.
 
 ### Restore from trash
 
 1. Target list = `previous_list_id` if exists else `INBOX_LIST_ID`.
 2. Проверить лимит 100.
-3. `deleted_at = NULL`, restore descendants.
+3. `deleted_at = NULL`.
 
 ### Delete user list
 
-1. Для каждой задачи: `previous_list_id = list_id`, `deleted_at = now()` (+ subtasks).
-2. DELETE FROM lists WHERE id = :id AND type = 'user'.
+В одной транзакции (advisory lock по `user_id`):
 
-### Complete parent
+1. `FOR UPDATE` target (`type = 'user'`); иначе `None` → 404.
+2. `UPDATE tasks SET previous_list_id = list_id, list_id = Inbox, deleted_at = COALESCE(deleted_at, now()) WHERE list_id = :id` — FK требует перенос `list_id` до DELETE.
+3. `DELETE FROM lists WHERE id = :id AND type = 'user'`.
+4. Компакт позиций: `position - 1` у соседей справа.
 
-1. UPDATE all descendants SET status=completed, completed_at=now().
-2. UPDATE root SET status=completed, completed_at=now().
+### Complete
 
-### Auto-complete parent
-
-Trigger после complete подзадачи: если all siblings completed → complete parent (рекурсивно вверх).
+1. UPDATE task SET status=completed, completed_at=now().
 
 ---
 
@@ -451,9 +440,8 @@ Trigger после complete подзадачи: если all siblings completed 
 
 - **Источник:** только корзина.
 - **Операции:** `DELETE /tasks/{id}` (404 если not trashed), `DELETE /views/trash` (bulk).
-- **Каскад:** hard delete root → hard delete all `parent_id = root`.
 - **Retention:** нет авто-очистки; completed вне корзины хранятся бессрочно.
-- **Списки:** user list hard delete не оставляет tombstone; задачи только через soft delete.
+- **Списки:** user list hard delete не оставляет tombstone; задачи soft-delete + `list_id`→Inbox (FK).
 
 ---
 
@@ -466,18 +454,18 @@ src/
 │   ├── dependencies.py          # get_current_user_id
 │   └── v1/
 │       ├── router.py            # /v1
-│       ├── lists.py             # ✅ CRUD списков (DELETE stub); без tasks
-│       ├── tasks.py             # 🟡 GET/POST `/`; GET/PATCH `/{id}`; lifecycle/subtasks stubs
+│       ├── lists.py             # ✅ CRUD списков (вкл. DELETE); без tasks
+│       ├── tasks.py             # ✅ CRUD + lifecycle
 │       └── views.py             # ❌ ещё нет
 ├── services/
 │   ├── auth.py
-│   ├── list.py                  # ✅ без delete; create → 409
-│   ├── task.py                  # 🟡 get/update done; list/create/lifecycle stubs
+│   ├── list.py                  # ✅ CRUD; create → 409; delete → 404
+│   ├── task.py                  # ✅ get/list/create/update/lifecycle
 │   └── dependencies.py
 ├── repository/
 │   ├── user.py
-│   ├── list.py                  # ✅ get/create/rename/reorder(+cascade); delete stub
-│   ├── task.py                  # 🟡 get/update; list/create/lifecycle stubs
+│   ├── list.py                  # ✅ get/create/rename/reorder/delete(+cascade)
+│   ├── task.py                  # ✅ flat tasks, без cascades
 │   ├── base.py
 │   └── dependencies.py
 ├── models/
@@ -520,10 +508,12 @@ src/
 | prefix `/api/v1` | `/v1` |
 | bulk reorder `ordered_ids` | per-list `PATCH .../reorder` + `position` (+ каскад) |
 | лимит списков → 403 | → `409` |
+| Подзадачи в MVP | **Снято** → post-MVP |
 
 ---
 
 ## Post-MVP
 
+- **Подзадачи** — `parent_id`, `GET/POST /tasks/{id}/subtasks`, каскады move/complete/trash/restore, auto-complete родителя, partial indexes с `parent_id IS NULL`, лимит 100 = корни + потомки.
 - **Архивация списка** — отдельный контейнер, не корзина; restore списка целиком.
 - **Timezone в профиле** — если фронт перестанет слать tz на каждый запрос.

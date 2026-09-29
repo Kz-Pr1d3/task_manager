@@ -32,6 +32,9 @@ htmlcov/
 *.swp
 *.swo
 
+# Local Cursor rules
+.cursor/rules/venv-activation.mdc
+
 # Keys
 keys/
 
@@ -44,3 +47,6 @@ Thumbs.db
 
 # Prometheus
 prometheusdata/
+
+# Redis
+redisdata/

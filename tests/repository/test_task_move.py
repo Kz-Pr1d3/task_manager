@@ -1,5 +1,6 @@
 import pytest
 
+from src.models.enums import TaskWriteStatus
 from src.repository.base import BaseRepository
 from src.repository.task import TaskRepository
 
@@ -88,71 +89,20 @@ async def test__move_task__success(
         test_user_id,
         source_id,
     )
-    moved = await task_repo.move_task(
+    result = await task_repo.move_task(
         user_id=test_user_id,
         task_id=root["id"],
         list_id=target_id,
         limit=100,
     )
+    assert result.status is TaskWriteStatus.ok
+    moved = result.task
     assert moved is not None
     assert moved.id == root["id"]
     assert moved.list_id == target_id
     assert moved.previous_list_id is None
     assert await task_repo.count_tasks_in_list(user_id=test_user_id, list_id=source_id) == 0
     assert await task_repo.count_tasks_in_list(user_id=test_user_id, list_id=target_id) == 1
-
-
-async def test__move_task__cascade_subtasks(
-    task_repo: TaskRepository,
-    test_user_id: int,
-    two_user_lists: tuple[int, int],
-    base_repo: BaseRepository,
-):
-    source_id, target_id = two_user_lists
-    root = await base_repo.one(
-        """
-        INSERT INTO tasks (user_id, list_id, title, status)
-        VALUES ($1, $2, 'parent', 'active')
-        RETURNING id
-        """,
-        test_user_id,
-        source_id,
-    )
-    await base_repo.query(
-        """
-        INSERT INTO tasks (user_id, list_id, parent_id, title, status)
-        VALUES
-            ($1, $2, $3, 'child-a', 'active'),
-            ($1, $2, $3, 'child-b', 'active')
-        """,
-        test_user_id,
-        source_id,
-        root["id"],
-    )
-
-    moved = await task_repo.move_task(
-        user_id=test_user_id,
-        task_id=root["id"],
-        list_id=target_id,
-        limit=100,
-    )
-    assert moved is not None
-    assert moved.list_id == target_id
-
-    children = await base_repo.query(
-        """
-        SELECT id, list_id, previous_list_id
-        FROM tasks
-        WHERE user_id = $1 AND parent_id = $2
-        ORDER BY id
-        """,
-        test_user_id,
-        root["id"],
-    )
-    assert len(children) == 2
-    assert all(c["list_id"] == target_id for c in children)
-    assert all(c["previous_list_id"] is None for c in children)
-    assert await task_repo.count_tasks_in_list(user_id=test_user_id, list_id=target_id) == 3
 
 
 async def test__move_task__list_not_accessible(
@@ -171,13 +121,14 @@ async def test__move_task__list_not_accessible(
         test_user_id,
         source_id,
     )
-    moved = await task_repo.move_task(
+    result = await task_repo.move_task(
         user_id=test_user_id,
         task_id=root["id"],
         list_id=999_999,
         limit=100,
     )
-    assert moved is None
+    assert result.status is TaskWriteStatus.forbidden
+    assert result.task is None
     still = await task_repo.get_task(user_id=test_user_id, task_id=root["id"])
     assert still is not None
     assert still.list_id == source_id
@@ -187,13 +138,14 @@ async def test__move_task__missing_task(
     task_repo: TaskRepository, test_user_id: int, two_user_lists: tuple[int, int]
 ):
     _, target_id = two_user_lists
-    moved = await task_repo.move_task(
+    result = await task_repo.move_task(
         user_id=test_user_id,
         task_id=999_999,
         list_id=target_id,
         limit=100,
     )
-    assert moved is None
+    assert result.status is TaskWriteStatus.not_found
+    assert result.task is None
 
 
 async def test__move_task__trashed_task(
@@ -212,13 +164,14 @@ async def test__move_task__trashed_task(
         test_user_id,
         source_id,
     )
-    moved = await task_repo.move_task(
+    result = await task_repo.move_task(
         user_id=test_user_id,
         task_id=root["id"],
         list_id=target_id,
         limit=100,
     )
-    assert moved is None
+    assert result.status is TaskWriteStatus.not_found
+    assert result.task is None
 
 
 async def test__move_task__limit_reached(
@@ -246,24 +199,16 @@ async def test__move_task__limit_reached(
         test_user_id,
         source_id,
     )
-    await base_repo.query(
-        """
-        INSERT INTO tasks (user_id, list_id, parent_id, title, status)
-        VALUES ($1, $2, $3, 'child', 'active')
-        """,
-        test_user_id,
-        source_id,
-        root["id"],
-    )
-    # target=2, subtree=2 → 4 > limit=3
-    moved = await task_repo.move_task(
+    # target=2, moving 1 → 3 > limit=2
+    result = await task_repo.move_task(
         user_id=test_user_id,
         task_id=root["id"],
         list_id=target_id,
-        limit=3,
+        limit=2,
     )
-    assert moved is None
-    assert await task_repo.count_tasks_in_list(user_id=test_user_id, list_id=source_id) == 2
+    assert result.status is TaskWriteStatus.limit
+    assert result.task is None
+    assert await task_repo.count_tasks_in_list(user_id=test_user_id, list_id=source_id) == 1
     assert await task_repo.count_tasks_in_list(user_id=test_user_id, list_id=target_id) == 2
 
 
@@ -278,16 +223,19 @@ async def test__move_task__same_list_noop_at_repo(
         """
         INSERT INTO tasks (user_id, list_id, title, status)
         VALUES ($1, $2, 'stay', 'active')
-        RETURNING id, list_id
+        RETURNING id, list_id, updated_at
         """,
         test_user_id,
         source_id,
     )
-    # repo не делает same-list no-op — возвращает None (сервис обрабатывает раньше)
-    moved = await task_repo.move_task(
+    result = await task_repo.move_task(
         user_id=test_user_id,
         task_id=root["id"],
         list_id=source_id,
         limit=100,
     )
-    assert moved is None
+    assert result.status is TaskWriteStatus.ok
+    assert result.task is not None
+    assert result.task.id == root["id"]
+    assert result.task.list_id == source_id
+    assert result.task.updated_at == root["updated_at"]

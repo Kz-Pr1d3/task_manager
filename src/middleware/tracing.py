@@ -13,7 +13,11 @@ tracer = trace.get_tracer(__name__)
 
 
 def setup_tracing(service_name: str = "my-service") -> None:
-    """Call once at app startup to initialise the tracing pipeline."""
+    """
+    Инициализирует OpenTelemetry tracing pipeline.
+
+    :param service_name: имя сервиса в span provider.
+    """
     provider = TracerProvider()
 
     # ConsoleSpanExporter prints spans to stdout.
@@ -30,9 +34,16 @@ def setup_tracing(service_name: str = "my-service") -> None:
 
 
 class TracingMiddleware(BaseHTTPMiddleware):
-    """Wraps every HTTP request in an OpenTelemetry span."""
+    """Оборачивает каждый HTTP-запрос в OpenTelemetry span."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        """
+        Создаёт span с method/url/status для запроса.
+
+        :param request: входящий HTTP-запрос.
+        :param call_next: следующий обработчик в цепочке.
+        :returns: HTTP-ответ downstream.
+        """
         span_name = f"{request.method} {request.url.path}"
 
         with tracer.start_as_current_span(span_name) as span:

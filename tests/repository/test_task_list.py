@@ -122,41 +122,6 @@ async def test__list_tasks__pagination_next_page(
     assert second[0].id > first[-1].id
 
 
-async def test__list_tasks__exclude_subtasks(
-    task_repo: TaskRepository,
-    test_user_id: int,
-    user_list_id: int,
-    base_repo: BaseRepository,
-):
-    root = await base_repo.one(
-        """
-        INSERT INTO tasks (user_id, list_id, title, status)
-        VALUES ($1, $2, 'root', 'active')
-        RETURNING id
-        """,
-        test_user_id,
-        user_list_id,
-    )
-    await base_repo.query(
-        """
-        INSERT INTO tasks (user_id, list_id, parent_id, title, status)
-        VALUES ($1, $2, $3, 'sub', 'active')
-        """,
-        test_user_id,
-        user_list_id,
-        root["id"],
-    )
-
-    items = await task_repo.list_tasks(
-        user_id=test_user_id,
-        list_id=user_list_id,
-        limit=20,
-    )
-    assert len(items) == 1
-    assert items[0].title == "root"
-    assert items[0].parent_id is None
-
-
 async def test__list_tasks__exclude_deleted(
     task_repo: TaskRepository,
     test_user_id: int,

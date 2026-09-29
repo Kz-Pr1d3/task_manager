@@ -6,12 +6,18 @@ from src.core.config import BASE_DIR, configs
 
 
 class Keys:
+    """Кэш PEM private/public ключей для подписи JWT."""
+
     _private_key: str | None = None
     _public_key: str | None = None
 
     @classmethod
     def load_keys(cls) -> None:
-        """Читает PEM из файлов в память. Private key в .env может быть encrypted — расшифровываем."""
+        """
+        Читает PEM из файлов в память.
+
+        Private key в .env может быть encrypted — расшифровываем паролем.
+        """
         private_path = Path(configs.private_key_path)
         public_path = Path(configs.public_key_path)
         if not private_path.is_absolute():
@@ -37,12 +43,24 @@ class Keys:
 
     @classmethod
     def get_private_key(cls) -> str:
+        """
+        Возвращает приватный PEM из кэша.
+
+        :returns: PEM-строка private key.
+        :raises RuntimeError: если ``load_keys`` ещё не вызывали.
+        """
         if cls._private_key is None:
             raise RuntimeError("Keys not loaded. Call Keys.load_keys() first.")
         return cls._private_key
 
     @classmethod
     def get_public_key(cls) -> str:
+        """
+        Возвращает публичный PEM из кэша.
+
+        :returns: PEM-строка public key.
+        :raises RuntimeError: если ``load_keys`` ещё не вызывали.
+        """
         if cls._public_key is None:
             raise RuntimeError("Keys not loaded. Call Keys.load_keys() first.")
         return cls._public_key

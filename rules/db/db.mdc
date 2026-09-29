@@ -10,6 +10,7 @@ alwaysApply: true
 - DDL: `db/scripts/init.sql`
 - Данные: `db/data/` (bind mount, в .gitignore)
 - Драйвер: `asyncpg` (без ORM)
+- Стиль SQL в репозиториях (минимум round-trip, CTE) — [code/python.md](../code/python.md) §3
 
 ### Таблицы
 
@@ -39,7 +40,7 @@ Seed: `id=1` Inbox.
 | id | SERIAL PK | |
 | user_id | INT NOT NULL FK users | |
 | list_id | INT NOT NULL FK lists | |
-| parent_id | INT NULL FK tasks | подзадачи |
+| parent_id | INT NULL FK tasks | reserved, post-MVP; в MVP не используется |
 | previous_list_id | INT NULL | без FK (list мог быть hard-deleted); только trash |
 | title | VARCHAR(50) NOT NULL | |
 | description | TEXT | |
@@ -50,3 +51,24 @@ Seed: `id=1` Inbox.
 | created_at / updated_at / completed_at | TIMESTAMPTZ | |
 
 Индексы и CHECK-ограничения — в `db/scripts/init.sql`. Детали пагинации/views — [tasks_tech.md](../development_plans/tasks_tech.md).
+
+**notification**
+| Колонка | Тип | Описание |
+|---|---|---|
+| id | BIGSERIAL PK | |
+| event_id | VARCHAR(160) NOT NULL | идемпотентность вместе с recipient_id |
+| type | VARCHAR(64) | напр. `task.deadline_reminder` |
+| category | VARCHAR(32) | default `tasks` |
+| severity | VARCHAR(16) | `normal` / `important` |
+| actor_id | INT NULL FK users | ON DELETE SET NULL |
+| recipient_id | INT NOT NULL FK users | ON DELETE CASCADE |
+| entity_type / entity_id | VARCHAR | связь с сущностью |
+| title / body | TEXT | |
+| metadata | JSONB | default `{}` |
+| deep_link | TEXT | внутренний путь, напр. `/tasks/42` |
+| grouping_key / group_count | | reserved (grouping вне MVP) |
+| occurred_at / created_at | TIMESTAMPTZ | |
+| read_at | TIMESTAMPTZ NULL | NULL = непрочитано |
+| expires_at | TIMESTAMPTZ NULL | |
+
+UNIQUE `(event_id, recipient_id)`. Индексы — в `init.sql`. План — [notifications_mvp.md](../development_plans/notifications_mvp.md).

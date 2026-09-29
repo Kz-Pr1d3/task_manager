@@ -7,7 +7,7 @@
 | `POST /auth/sign-up` | ✅ | access + refresh; refresh также в session cookie |
 | `POST /auth/sign-in` | ✅ | |
 | `POST /auth/refresh` | ✅ | body `RefreshRequest.refresh_token` |
-| `POST /auth/logout` | 🟡 | endpoint есть, handler `pass` |
+| `POST /auth/logout` | ✅ | revoke refresh в Redis + `session.clear()`, 204 |
 | JWT access (Bearer) | ✅ | `get_current_user_id` + RS256 keys |
 | Refresh в Redis | ✅ | `Security.store_refresh_token` |
 | SessionMiddleware | ✅ | cookie `SESSION_ID`, `same_site=strict`, `https_only=True` |
@@ -16,7 +16,7 @@
 | Валидация сложности пароля | ❌ | |
 | Rate limiting | ❌ | |
 | Email verification | ❌ | |
-| Тесты | ✅ частично | `tests/services/test_auth_service.py`, `tests/core/test_security.py` |
+| Тесты | ✅ частично | service sign-up; security hash + revoke refresh; API auth — нет |
 
 ---
 
@@ -27,7 +27,7 @@
 | `/auth/sign-up` | POST | ✅ | Регистрация | login (email), password | access + refresh (cookie) |
 | `/auth/sign-in` | POST | ✅ | Вход | login (email), password | access + refresh |
 | `/auth/refresh` | POST | ✅ | Обновление токенов | refresh (body) | новый access + новый refresh |
-| `/auth/logout` | POST | 🟡 | Инвалидация сессии | — | stub |
+| `/auth/logout` | POST | ✅ | Инвалидация сессии | refresh (body) | 204 |
 
 ## Middleware
 
@@ -61,11 +61,11 @@ src/
 | Токен | Где хранится | Передача |
 |-------|--------------|----------|
 | access | localStorage (фронт) | `Authorization: Bearer <token>` |
-| refresh | Redis (jti) + опционально session cookie при sign-up | body на `/auth/refresh`; cookie `SESSION_ID` |
+| refresh | Redis (jti) + session cookie при sign-up/sign-in/refresh | body на `/auth/refresh` и `/auth/logout`; cookie `SESSION_ID` |
 
 ## TODO (дальнейшие шаги)
 
-- [ ] Доделать `/auth/logout` — инвалидация refresh в Redis + очистка cookie
+- [x] Доделать `/auth/logout` — инвалидация refresh в Redis + очистка cookie
 - [ ] Валидация пароля (минимум 8 символов, хотя бы одна цифра, хотя бы одна заглавная буква)
 - [ ] Rate limiting на auth endpoints (защита от брутфорса)
 - [ ] Email verification при регистрации

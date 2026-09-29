@@ -62,28 +62,74 @@ CREATE TABLE IF NOT EXISTS tasks (
         status IN ('active', 'completed')
     )
 );
-CREATE INDEX IF NOT EXISTS tasks_parent_id_idx
-    ON tasks (parent_id);
 CREATE INDEX IF NOT EXISTS tasks_user_list_active_idx
     ON tasks (user_id, list_id)
     WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS tasks_list_pagination_idx
     ON tasks (user_id, list_id, created_at, id)
-    WHERE parent_id IS NULL AND deleted_at IS NULL;
+    WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS tasks_today_next7_idx
     ON tasks (user_id, due_date, id)
     WHERE deleted_at IS NULL
-      AND status = 'active'
-      AND parent_id IS NULL;
+      AND status = 'active';
 CREATE INDEX IF NOT EXISTS tasks_completed_idx
     ON tasks (user_id, completed_at DESC, id DESC)
     WHERE deleted_at IS NULL
-      AND parent_id IS NULL
       AND status = 'completed';
 CREATE INDEX IF NOT EXISTS tasks_trash_idx
     ON tasks (user_id, deleted_at DESC, id DESC)
-    WHERE deleted_at IS NOT NULL
-      AND parent_id IS NULL;
+    WHERE deleted_at IS NOT NULL;
+
+-- =============================================================================
+-- notification
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS notification (
+    id            BIGSERIAL PRIMARY KEY,
+    event_id      VARCHAR(160) NOT NULL,
+    type          VARCHAR(64)  NOT NULL,
+    category      VARCHAR(32)  NOT NULL DEFAULT 'tasks',
+    severity      VARCHAR(16)  NOT NULL DEFAULT 'normal',
+
+    actor_id      INT REFERENCES users (id) ON DELETE SET NULL,
+    recipient_id  INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+
+    entity_type   VARCHAR(32),
+    entity_id     VARCHAR(64),
+
+    title         TEXT NOT NULL,
+    body          TEXT,
+    metadata      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    deep_link     TEXT,
+
+    grouping_key  VARCHAR(256),
+    group_count   INTEGER NOT NULL DEFAULT 1,
+
+    occurred_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    read_at       TIMESTAMPTZ,
+    expires_at    TIMESTAMPTZ,
+
+    CONSTRAINT uq_notification_event_recipient
+        UNIQUE (event_id, recipient_id),
+    CONSTRAINT ck_notification_severity
+        CHECK (severity IN ('normal', 'important')),
+    CONSTRAINT ck_notification_group_count
+        CHECK (group_count > 0)
+);
+
+CREATE INDEX IF NOT EXISTS ix_notification_recipient_created
+    ON notification (recipient_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS ix_notification_recipient_unread
+    ON notification (recipient_id, id DESC)
+    WHERE read_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS ix_notification_recipient_category
+    ON notification (recipient_id, category, id DESC);
+
+CREATE INDEX IF NOT EXISTS ix_notification_grouping
+    ON notification (recipient_id, grouping_key, id DESC)
+    WHERE grouping_key IS NOT NULL;
 
 -- =============================================================================
 -- seed: системные списки

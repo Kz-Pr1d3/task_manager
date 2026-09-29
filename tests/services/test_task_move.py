@@ -1,7 +1,7 @@
 import pytest
 
 from src.core.database import db
-from src.core.exceptions import ConflictException, NotFoundException, UnprocessableEntityException
+from src.core.exceptions import ConflictException, NotFoundException
 from src.repository.base import BaseRepository
 from src.repository.task import TaskRepository
 from src.services.task import TaskService
@@ -186,37 +186,3 @@ async def test__move_task__limit_conflict(
             list_id=target_id,
         )
     assert "limit" in exc_info.value.detail.lower()
-
-
-async def test__move_task__subtask_rejected(
-    task_service: TaskService,
-    test_user_id: int,
-    two_user_lists: tuple[int, int],
-    base_repo: BaseRepository,
-):
-    source_id, target_id = two_user_lists
-    parent = await base_repo.one(
-        """
-        INSERT INTO tasks (user_id, list_id, title, status)
-        VALUES ($1, $2, 'parent', 'active')
-        RETURNING id
-        """,
-        test_user_id,
-        source_id,
-    )
-    child = await base_repo.one(
-        """
-        INSERT INTO tasks (user_id, list_id, parent_id, title, status)
-        VALUES ($1, $2, $3, 'child', 'active')
-        RETURNING id
-        """,
-        test_user_id,
-        source_id,
-        parent["id"],
-    )
-    with pytest.raises(UnprocessableEntityException):
-        await task_service.move_task(
-            user_id=test_user_id,
-            task_id=child["id"],
-            list_id=target_id,
-        )

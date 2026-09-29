@@ -1,12 +1,19 @@
 from typing import Annotated
 
 import redis.asyncio as redis
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from src.core.cache import get_redis
-from src.repository.dependencies import UserRepoDep, ListRepoDep, TaskRepoDep
+from src.core.redis_notification_bus import RedisNotificationBus
+from src.repository.dependencies import (
+    UserRepoDep,
+    ListRepoDep,
+    TaskRepoDep,
+    NotificationRepoDep,
+)
 from src.services.auth import AuthService
 from src.services.list import ListService
+from src.services.notification import NotificationService
 from src.services.task import TaskService
 
 
@@ -14,17 +21,58 @@ def get_auth_service(
         repo: UserRepoDep,
         redis_conn: Annotated[redis.Redis, Depends(get_redis)],
 ) -> AuthService:
+    """
+    Фабрика FastAPI-зависимости AuthService.
+
+    :param repo: репозиторий пользователей.
+    :param redis_conn: клиент Redis из DI.
+    :returns: экземпляр ``AuthService``.
+    """
     return AuthService(repository=repo, redis_client=redis_conn)
 
 
 def get_list_service(repo: ListRepoDep) -> ListService:
+    """
+    Фабрика FastAPI-зависимости ListService.
+
+    :param repo: репозиторий списков.
+    :returns: экземпляр ``ListService``.
+    """
     return ListService(repository=repo)
 
 
 def get_task_service(repo: TaskRepoDep) -> TaskService:
+    """
+    Фабрика FastAPI-зависимости TaskService.
+
+    :param repo: репозиторий задач.
+    :returns: экземпляр ``TaskService``.
+    """
     return TaskService(repository=repo)
+
+
+def get_notification_service(repo: NotificationRepoDep) -> NotificationService:
+    """
+    Фабрика FastAPI-зависимости NotificationService.
+
+    :param repo: репозиторий уведомлений.
+    :returns: экземпляр ``NotificationService``.
+    """
+    return NotificationService(repository=repo)
+
+
+def get_notification_bus(request: Request) -> RedisNotificationBus:
+    """
+    Достаёт ``RedisNotificationBus`` из ``app.state`` (lifespan).
+
+    :param request: текущий HTTP-запрос.
+    :returns: bus текущего процесса.
+    """
+    return request.app.state.notification_bus
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 ListServiceDep = Annotated[ListService, Depends(get_list_service)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
+NotificationServiceDep = Annotated[NotificationService, Depends(get_notification_service)]
+NotificationBusDep = Annotated[RedisNotificationBus, Depends(get_notification_bus)]

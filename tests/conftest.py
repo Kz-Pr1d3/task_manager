@@ -12,7 +12,8 @@ def _load_jwt_keys() -> None:
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app=app)
+    with TestClient(app=app) as test_client:
+        yield test_client
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@
 ### Навигация по правилам
 
 - [basics.md](basics.md) — структура проекта, архитектура, стек технологий
-- [code/python.md](code/python.md) — стандарты Python: стиль, типизация, импорты, обработка ошибок, докстринги (reST)
+- [code/python.md](code/python.md) — стандарты Python: стиль, типизация, импорты, ошибки, SQL (минимум round-trip / CTE), докстринги (reST)
 - [code/tests.md](code/tests.md) — стиль тестов: фикстуры, нейминг, без бездумных моков
 - [db/db.mdc](db/db.mdc) — база данных: подключение, таблицы, драйвер
 
@@ -13,9 +13,10 @@
 
 В каждом плане есть секция **«Статус реализации»** — сверяй с кодом перед работой.
 
-- [development_plans/auth_dev.md](development_plans/auth_dev.md) — авторизация (sign-up/in/refresh ✅, logout stub)
-- [development_plans/tasks_dev.md](development_plans/tasks_dev.md) — функционал задач и списков
+- [development_plans/auth_dev.md](development_plans/auth_dev.md) — авторизация (sign-up/in/refresh/logout ✅)
+- [development_plans/tasks_dev.md](development_plans/tasks_dev.md) — задачи/списки (CRUD+lifecycle+delete list ✅, views ❌)
 - [development_plans/tasks_tech.md](development_plans/tasks_tech.md) — задачи: API, БД, технические заметки
+- [development_plans/notifications_mvp.md](development_plans/notifications_mvp.md) — realtime-уведомления (шаги 1–5 ✅)
 
 ### Обновление правил
 

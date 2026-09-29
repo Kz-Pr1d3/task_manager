@@ -1,5 +1,6 @@
 import pytest
 
+from src.models.enums import TaskWriteStatus
 from src.repository.base import BaseRepository
 from src.repository.task import TaskRepository
 
@@ -61,37 +62,22 @@ async def cleanup_inbox_tasks(base_repo: BaseRepository, test_user_id: int):
     )
 
 
-async def test__is_writable_list__inbox(task_repo: TaskRepository, test_user_id: int):
-    assert await task_repo.is_writable_list(user_id=test_user_id, list_id=INBOX_LIST_ID) is True
-
-
-async def test__is_writable_list__own_user_list(
-    task_repo: TaskRepository, test_user_id: int, user_list_id: int
-):
-    assert await task_repo.is_writable_list(user_id=test_user_id, list_id=user_list_id) is True
-
-
-async def test__is_writable_list__foreign_or_missing(
-    task_repo: TaskRepository, test_user_id: int
-):
-    assert await task_repo.is_writable_list(user_id=test_user_id, list_id=999_999) is False
-
-
 async def test__create_task__inbox_success(
     task_repo: TaskRepository, test_user_id: int, cleanup_inbox_tasks
 ):
-    task = await task_repo.create_task(
+    result = await task_repo.create_task(
         user_id=test_user_id,
         list_id=INBOX_LIST_ID,
         title="Купить молоко",
         limit=100,
     )
+    assert result.status is TaskWriteStatus.ok
+    task = result.task
     assert task is not None
     assert task.user_id == test_user_id
     assert task.list_id == INBOX_LIST_ID
     assert task.title == "Купить молоко"
     assert task.status == "active"
-    assert task.parent_id is None
     assert task.due_date is None
     assert task.deleted_at is None
 
@@ -102,28 +88,30 @@ async def test__create_task__user_list_with_due_date(
     from datetime import datetime, timezone
 
     due = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
-    task = await task_repo.create_task(
+    result = await task_repo.create_task(
         user_id=test_user_id,
         list_id=user_list_id,
         title="Отчёт",
         due_date=due,
         limit=100,
     )
-    assert task is not None
-    assert task.list_id == user_list_id
-    assert task.due_date == due
+    assert result.status is TaskWriteStatus.ok
+    assert result.task is not None
+    assert result.task.list_id == user_list_id
+    assert result.task.due_date == due
 
 
 async def test__create_task__list_not_accessible(
     task_repo: TaskRepository, test_user_id: int
 ):
-    task = await task_repo.create_task(
+    result = await task_repo.create_task(
         user_id=test_user_id,
         list_id=999_999,
         title="ghost",
         limit=100,
     )
-    assert task is None
+    assert result.status is TaskWriteStatus.forbidden
+    assert result.task is None
 
 
 async def test__create_task__limit_reached(
@@ -141,10 +129,11 @@ async def test__create_task__limit_reached(
         test_user_id,
         user_list_id,
     )
-    task = await task_repo.create_task(
+    result = await task_repo.create_task(
         user_id=test_user_id,
         list_id=user_list_id,
         title="overflow",
         limit=2,
     )
-    assert task is None
+    assert result.status is TaskWriteStatus.limit
+    assert result.task is None

@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 import redis.asyncio as redis
 from fastapi import FastAPI
@@ -12,6 +13,8 @@ from src.core import cache
 from src.core.config import configs
 from src.core.database import db
 from src.core.keys import Keys
+from src.core.redis_notification_bus import RedisNotificationBus
+from src.core.sse_hub import SSEHub
 from src.middleware.logging import LoggingMiddleware
 from src.middleware.metrics import MetricsMiddleware
 from src.middleware.tracing import TracingMiddleware, setup_tracing
@@ -19,6 +22,14 @@ from src.middleware.tracing import TracingMiddleware, setup_tracing
 
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
+    """
+    Startup/shutdown: keys, DB pool, Redis, SSEHub, Redis bus listener.
+
+    Redis client без ``decode_responses`` (как ticket GETDEL / auth).
+    Bus сам нормализует bytes/str в pubsub.
+
+    :param app: экземпляр FastAPI.
+    """
     if configs.enable_tracing:
         setup_tracing(configs.backend_service_name)
 
@@ -29,19 +40,39 @@ async def app_lifespan(app: FastAPI):
     cache.redis_client = redis.Redis.from_pool(pool)
     await cache.redis_client.ping()
 
-    yield
+    sse_hub = SSEHub()
+    notification_bus = RedisNotificationBus(
+        client=cache.redis_client,
+        hub=sse_hub,
+    )
+    listener_task = asyncio.create_task(notification_bus.listen_forever())
 
-    await db.disconnect()
+    app.state.sse_hub = sse_hub
+    app.state.notification_bus = notification_bus
 
-    if cache.redis_client:
-        await cache.redis_client.aclose()
+    try:
+        yield
+    finally:
+        listener_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await listener_task
+
+        await db.disconnect()
+
+        if cache.redis_client:
+            await cache.redis_client.aclose()
+            cache.redis_client = None
 
 
 class AppCreator:
     """Класс для создания FastAPI приложения."""
 
     def __init__(self, lifespan=None):
-        """Создание экземпляра FastAPI приложения."""
+        """
+        Создание экземпляра FastAPI приложения.
+
+        :param lifespan: async context manager startup/shutdown.
+        """
 
         self.app = FastAPI(
             title=configs.app_name,
@@ -87,4 +118,9 @@ app = app_creator.app
 
 @app.get("/health")
 async def health():
+    """
+    Liveness-проверка сервиса.
+
+    :returns: ``{"status": "ok"}``.
+    """
     return {"status": "ok"}

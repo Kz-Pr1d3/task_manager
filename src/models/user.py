@@ -4,6 +4,8 @@ from pydantic import BaseModel, EmailStr
 
 
 class User(BaseModel):
+    """Модель пользователя из таблицы users."""
+
     id: int
     email: EmailStr
     password: str | None

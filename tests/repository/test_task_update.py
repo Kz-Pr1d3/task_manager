@@ -1,5 +1,6 @@
 import pytest
 
+from src.models.enums import TaskWriteStatus
 from src.repository.base import BaseRepository
 from src.repository.task import TaskRepository
 
@@ -36,15 +37,16 @@ async def test__update_task_info__success(
         title="before",
         limit=100,
     )
-    assert created is not None
+    assert created.status is TaskWriteStatus.ok
+    assert created.task is not None
 
     updated = await task_repo.update_task_info(
         user_id=test_user_id,
-        task_id=created.id,
+        task_id=created.task.id,
         info={"title": "after", "description": "desc"},
     )
     assert updated is not None
-    assert updated.id == created.id
+    assert updated.id == created.task.id
     assert updated.title == "after"
     assert updated.description == "desc"
     assert updated.list_id == INBOX_LIST_ID

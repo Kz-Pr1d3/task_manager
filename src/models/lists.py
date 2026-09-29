@@ -17,16 +17,24 @@ class CustomList(BaseModel):
 
 
 class CustomListItems(BaseModel):
+    """Обёртка списка пользовательских списков."""
+
     items: list[CustomList]
 
 
 class CreateCustomListRequest(BaseModel):
+    """Тело запроса на создание user-списка."""
+
     name: str = Field(max_length=255)
 
 
 class RenameCustomListRequest(BaseModel):
+    """Тело запроса на переименование user-списка."""
+
     name: str = Field(max_length=255)
 
 
 class ReorderCustomListRequest(BaseModel):
+    """Тело запроса на смену позиции user-списка."""
+
     position: int = Annotated[int, Field(ge=1, le=5)]

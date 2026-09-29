@@ -3,6 +3,7 @@ import pytest
 from src.core.database import db
 from src.repository.base import BaseRepository
 from src.repository.list import ListRepository
+from src.repository.notification import NotificationRepository
 from src.repository.task import TaskRepository
 from src.repository.user import UserRepository
 
@@ -32,3 +33,8 @@ async def task_repo(create_pool) -> TaskRepository:
 @pytest.fixture
 async def user_repo(create_pool) -> UserRepository:
     return UserRepository(pool=create_pool.pool)
+
+
+@pytest.fixture
+async def notification_repo(create_pool) -> NotificationRepository:
+    return NotificationRepository(pool=create_pool.pool)

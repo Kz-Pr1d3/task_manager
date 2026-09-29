@@ -27,7 +27,62 @@ sqlalchemy>=2.0.0
 
 ### 3. Работа с базой данных этого проекта
 
-Появится в будущем
+Драйвер: `asyncpg` (без ORM). DDL — `db/scripts/init.sql`. Схема — `rules/db/db.mdc`.
+
+**Минимум round-trip:** один вызов `one()` / `query()` на операцию репозитория. Не делай в Python цикл `SELECT → проверка → INSERT/UPDATE` отдельными запросами — это лишние RTT и TOCTOU.
+
+**Предпочитай CTE:** lock / проверка доступа / COUNT / мутация / `write_status` — в одном SQL через `WITH …`. Результат — `RETURNING` + финальный `SELECT` (часто `meta` + `LEFT JOIN` на вставку/апдейт).
+
+Эталон: `TaskRepository.create_task` / `move_task` / `restore_task`, `ListRepository.create_custom_list`.
+
+```python
+query = """
+    WITH _lock AS (
+        SELECT pg_advisory_xact_lock($1, $2)
+    ),
+    list_ok AS (
+        SELECT id FROM lists
+        WHERE id = $4
+          AND (type = 'inbox' OR (type = 'user' AND user_id = $3))
+    ),
+    stats AS (
+        SELECT COUNT(*)::int AS cnt
+        FROM tasks
+        WHERE user_id = $3 AND list_id = $4 AND deleted_at IS NULL
+    ),
+    ins AS (
+        INSERT INTO tasks (user_id, list_id, title, status)
+        SELECT $3, list_ok.id, $5, 'active'
+        FROM list_ok, stats, _lock
+        WHERE stats.cnt < $6
+        RETURNING *
+    ),
+    meta AS (
+        SELECT CASE
+            WHEN EXISTS (SELECT 1 FROM ins) THEN 'ok'
+            WHEN NOT EXISTS (SELECT 1 FROM list_ok) THEN 'forbidden'
+            ELSE 'limit'
+        END AS write_status
+    )
+    SELECT meta.write_status, ins.*
+    FROM meta
+    LEFT JOIN ins ON TRUE
+"""
+row = await self.one(query, lock_ns, lock_key, user_id, list_id, title, limit)
+```
+
+**Когда несколько запросов ок:**
+- простой CRUD одной строки (`get` / `UPDATE … RETURNING` / `DELETE … RETURNING`);
+- `transaction()` + несколько `conn.execute` — только если один CTE неудобен/нечитаем (сложный ветвящийся reorder). Тогда всё равно одна транзакция на одном `conn`; не зови `self.one()`/`self.query()` внутри — они берут другой connection.
+
+**Обязательно:**
+- параметры `$1…$n`, без f-string интерполяции значений;
+- фильтр владельца (`user_id`) в SQL, не только в сервисе;
+- advisory lock внутри того же CTE/транзакции, что и лимит-мутация.
+
+**Нельзя:**
+- count → insert двумя round-trip без lock (гонка лимита);
+- «сначала SELECT в Python, потом решить» для write-path с проверками.
 
 ### 4. Обработка ошибок
 
@@ -224,9 +279,10 @@ httpx.get("https://api.example.com/data", {"limit": 100}, None, None, 30.0)  # �
 2. **Не игнорируй исключения** - всегда логируй
 3. **Не используй print()** - только log.*
 4. **Не делай SQL запросы без параметров**
-5. **Не забывай про таймауты** в HTTP запросах
-6. **Не используй синхронные операции** для долгих задач без необходимости
-7. **Не добавляй в requirements.txt уже включенные зависимости**
+5. **Не дроби write-path на несколько round-trip**, если можно одним CTE
+6. **Не забывай про таймауты** в HTTP запросах
+7. **Не используй синхронные операции** для долгих задач без необходимости
+8. **Не добавляй в requirements.txt уже включенные зависимости**
 
 ### ✅ Лучшие практики:
 
@@ -237,6 +293,7 @@ httpx.get("https://api.example.com/data", {"limit": 100}, None, None, 30.0)  # �
 5. **Используй enumerate()** вместо range(len())
 6. **Используй f-строки** для форматирования
 7. **Проверяй зависимости** перед добавлением в requirements.txt
+8. **Один SQL round-trip на операцию репозитория** (CTE + RETURNING)
 
 ## Проверка зависимостей
 

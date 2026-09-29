@@ -17,19 +17,29 @@ async def create_list_data(base_repo: BaseRepository, test_user_id: int):
 
     yield
 
-    query = """
-    DELETE FROM lists WHERE type = 'user' AND user_id = $1;
-    """
-    await base_repo.query(query, test_user_id)
+    await base_repo.query("DELETE FROM tasks WHERE user_id = $1", test_user_id)
+    await base_repo.query(
+        "DELETE FROM lists WHERE type = 'user' AND user_id = $1",
+        test_user_id,
+    )
 
     # fix serial id
-    query = """
+    await base_repo.query(
+        """
         SELECT setval(
             pg_get_serial_sequence('lists', 'id'),
             (SELECT COALESCE(MAX(id), 1) FROM lists)
-        );
-    """
-    await base_repo.query(query)
+        )
+        """
+    )
+    await base_repo.query(
+        """
+        SELECT setval(
+            pg_get_serial_sequence('tasks', 'id'),
+            (SELECT COALESCE(MAX(id), 1) FROM tasks)
+        )
+        """
+    )
 
 
 async def test__get_user_lists__empty(list_repo: ListRepository, test_user_id: int):
@@ -174,3 +184,108 @@ async def test__reorder_custom_list__not_found(list_repo: ListRepository, test_u
         user_id=test_user_id, list_id=999999, position=1
     )
     assert custom_list is None
+
+
+async def test__delete_custom_list__success_compacts_positions(
+    create_list_data, list_repo: ListRepository, test_user_id: int
+):
+    custom_lists = await list_repo.get_custom_lists(user_id=test_user_id)
+    # Работа=1, Дом=2, Покупки=3 → удаляем Дом
+    middle = custom_lists[1]
+    deleted = await list_repo.delete_custom_list(user_id=test_user_id, list_id=middle.id)
+
+    assert deleted is not None
+    assert deleted.id == middle.id
+    assert deleted.name == "Дом"
+
+    ordered = await list_repo.get_custom_lists(user_id=test_user_id)
+    assert [item.name for item in ordered] == ["Работа", "Покупки"]
+    assert [item.position for item in ordered] == [1, 2]
+
+
+async def test__delete_custom_list__trashes_tasks_to_inbox(
+    create_list_data,
+    list_repo: ListRepository,
+    base_repo: BaseRepository,
+    test_user_id: int,
+):
+    custom_lists = await list_repo.get_custom_lists(user_id=test_user_id)
+    target = custom_lists[0]
+
+    task_row = await base_repo.one(
+        """
+        INSERT INTO tasks (user_id, list_id, title, status)
+        VALUES ($1, $2, 'to trash', 'active')
+        RETURNING id
+        """,
+        test_user_id,
+        target.id,
+    )
+    task_id = task_row["id"]
+
+    deleted = await list_repo.delete_custom_list(user_id=test_user_id, list_id=target.id)
+    assert deleted is not None
+
+    task = await base_repo.one(
+        """
+        SELECT list_id, previous_list_id, deleted_at, updated_at
+        FROM tasks WHERE id = $1
+        """,
+        task_id,
+    )
+    assert task["deleted_at"] is not None
+    assert task["updated_at"] is not None
+    assert task["deleted_at"] == task["updated_at"]
+    assert task["previous_list_id"] == target.id
+    assert task["list_id"] == 1  # Inbox
+
+    remaining = await list_repo.get_custom_lists(user_id=test_user_id)
+    assert all(item.id != target.id for item in remaining)
+
+
+async def test__delete_custom_list__already_trashed_moves_list_id(
+    create_list_data,
+    list_repo: ListRepository,
+    base_repo: BaseRepository,
+    test_user_id: int,
+):
+    custom_lists = await list_repo.get_custom_lists(user_id=test_user_id)
+    target = custom_lists[0]
+
+    task_row = await base_repo.one(
+        """
+        INSERT INTO tasks (user_id, list_id, title, status, previous_list_id, deleted_at)
+        VALUES ($1, $2, 'already trash', 'active', $2, now())
+        RETURNING id, deleted_at
+        """,
+        test_user_id,
+        target.id,
+    )
+    task_id = task_row["id"]
+    old_deleted_at = task_row["deleted_at"]
+
+    deleted = await list_repo.delete_custom_list(user_id=test_user_id, list_id=target.id)
+    assert deleted is not None
+
+    task = await base_repo.one(
+        """
+        SELECT list_id, previous_list_id, deleted_at, updated_at
+        FROM tasks WHERE id = $1
+        """,
+        task_id,
+    )
+    assert task["list_id"] == 1
+    assert task["previous_list_id"] == target.id
+    assert task["deleted_at"] == old_deleted_at
+    assert task["updated_at"] is not None
+    assert task["updated_at"] >= old_deleted_at
+
+
+async def test__delete_custom_list__not_found(list_repo: ListRepository, test_user_id: int):
+    assert await list_repo.delete_custom_list(user_id=test_user_id, list_id=999_999) is None
+
+
+async def test__delete_custom_list__rejects_inbox(
+    list_repo: ListRepository, test_user_id: int
+):
+    assert await list_repo.delete_custom_list(user_id=test_user_id, list_id=1) is None

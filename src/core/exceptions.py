@@ -47,6 +47,13 @@ class ConflictException(AppException):
     default_detail = "Conflict"
 
 
+class PayloadTooLargeException(AppException):
+    """HTTP 413: размер тела/файла превышает лимит."""
+
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    default_detail = "Payload too large"
+
+
 class UnprocessableEntityException(AppException):
     """HTTP 422: сущность понятна, но обработать нельзя."""
 

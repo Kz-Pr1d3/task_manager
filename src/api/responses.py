@@ -38,3 +38,10 @@ UNPROCESSABLE = {
         "description": "Unprocessable entity",
     },
 }
+
+PAYLOAD_TOO_LARGE = {
+    status.HTTP_413_CONTENT_TOO_LARGE: {
+        "model": ErrorResponse,
+        "description": "Payload too large",
+    },
+}

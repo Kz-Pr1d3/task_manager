@@ -19,6 +19,49 @@ services:
     volumes:
       - ./redisdata:/data
 
+  minio:
+    build:
+      context: ./docker/minio
+    image: task-manager-minio:local
+    container_name: task_manager_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      # Bucket PutBucketCors на этом MinIO → NotImplemented; CORS на API-сервере.
+      # Prod: конкретный origin фронта, без *
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:5173
+      # Аналог AbortIncompleteMultipartUpload ~7 дней (S3 lifecycle XML MinIO не принимает)
+      MINIO_API_STALE_UPLOADS_EXPIRY: 168h
+      MINIO_API_STALE_UPLOADS_CLEANUP_INTERVAL: 6h
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # One-shot: бакет + anonymous=none + lifecycle tmp/pending (идемпотентно)
+  minio-init:
+    build:
+      context: .
+      dockerfile: docker/minio/Dockerfile.init
+    image: task-manager-minio-init:local
+    container_name: task_manager_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_BUCKET: task-manager-media
+    restart: "no"
   prometheus:
     image: prom/prometheus:v2.53.0
     network_mode: "host"

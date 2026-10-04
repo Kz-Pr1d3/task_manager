@@ -50,7 +50,7 @@ Seed: `id=1` Inbox.
 | deleted_at | TIMESTAMPTZ NULL | soft delete («не буду делать» = trash) |
 | created_at / updated_at / completed_at | TIMESTAMPTZ | |
 
-Индексы и CHECK-ограничения — в `db/scripts/init.sql`. Детали пагинации/views — [tasks_tech.md](../development_plans/tasks_tech.md).
+Индексы и CHECK-ограничения — в `db/scripts/init.sql`. Детали пагинации/views — [tasks_tech.md](../development_plans/tasks/tasks_tech.md).
 
 **notification**
 | Колонка | Тип | Описание |
@@ -71,4 +71,19 @@ Seed: `id=1` Inbox.
 | read_at | TIMESTAMPTZ NULL | NULL = непрочитано |
 | expires_at | TIMESTAMPTZ NULL | |
 
-UNIQUE `(event_id, recipient_id)`. Индексы — в `init.sql`. План — [notifications_mvp.md](../development_plans/notifications_mvp.md).
+UNIQUE `(event_id, recipient_id)`. Индексы — в `init.sql`. План — [notifications_mvp.md](../development_plans/notifications/notifications_mvp.md).
+
+**task_attachment**
+| Колонка | Тип | Описание |
+|---|---|---|
+| id | BIGSERIAL PK | |
+| task_id | INT NOT NULL FK tasks | ON DELETE CASCADE |
+| user_id | INT NOT NULL FK users | ON DELETE CASCADE |
+| storage_key | TEXT | ключ в S3 (`tmp/...` → `users/...`) |
+| original_name | VARCHAR(255) | имя файла пользователя |
+| content_type | VARCHAR(127) | MIME |
+| size_bytes | BIGINT NULL | после complete |
+| status | VARCHAR(16) | `pending` / `ready` / `failed` |
+| created_at / ready_at | TIMESTAMPTZ | |
+
+Лимит файлов на задачу — repo/service. План — [s3_dev.md](../development_plans/s3/s3_dev.md). Multipart (`s3_upload_id`, `part_size`) — [s3_multipart_dev.md](../development_plans/s3/s3_multipart_dev.md).

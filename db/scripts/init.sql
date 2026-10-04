@@ -132,6 +132,34 @@ CREATE INDEX IF NOT EXISTS ix_notification_grouping
     WHERE grouping_key IS NOT NULL;
 
 -- =============================================================================
+-- task_attachment (S3 / MinIO вложения)
+-- лимит файлов на задачу — service/repo (HTTP 409)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS task_attachment (
+    id              BIGSERIAL PRIMARY KEY,
+    task_id         INT NOT NULL REFERENCES tasks (id) ON DELETE CASCADE,
+    user_id         INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    storage_key     TEXT NOT NULL,
+    original_name   VARCHAR(255) NOT NULL,
+    content_type    VARCHAR(127) NOT NULL,
+    size_bytes      BIGINT,
+    status          VARCHAR(16) NOT NULL DEFAULT 'pending',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ready_at        TIMESTAMPTZ,
+    CONSTRAINT task_attachment_status_check
+        CHECK (status IN ('pending', 'ready', 'failed')),
+    CONSTRAINT task_attachment_size_nonneg
+        CHECK (size_bytes IS NULL OR size_bytes >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS task_attachment_task_idx
+    ON task_attachment (task_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS task_attachment_pending_idx
+    ON task_attachment (status, created_at)
+    WHERE status = 'pending';
+
+-- =============================================================================
 -- seed: системные списки
 -- =============================================================================
 INSERT INTO lists (id, user_id, type, name, position)

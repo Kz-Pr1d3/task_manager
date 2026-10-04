@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import Depends
 
 from src.core.database import db
+from src.repository.attachment import AttachmentRepository
 from src.repository.list import ListRepository
 from src.repository.notification import NotificationRepository
 from src.repository.task import TaskRepository
@@ -45,7 +46,17 @@ def get_notification_repo() -> NotificationRepository:
     return NotificationRepository(pool=db.pool)
 
 
+def get_attachment_repo() -> AttachmentRepository:
+    """
+    Фабрика FastAPI-зависимости AttachmentRepository.
+
+    :returns: экземпляр ``AttachmentRepository`` на общем пуле.
+    """
+    return AttachmentRepository(pool=db.pool)
+
+
 UserRepoDep = Annotated[UserRepository, Depends(get_user_repo)]
 ListRepoDep = Annotated[ListRepository, Depends(get_list_repo)]
 TaskRepoDep = Annotated[TaskRepository, Depends(get_task_repo)]
 NotificationRepoDep = Annotated[NotificationRepository, Depends(get_notification_repo)]
+AttachmentRepoDep = Annotated[AttachmentRepository, Depends(get_attachment_repo)]

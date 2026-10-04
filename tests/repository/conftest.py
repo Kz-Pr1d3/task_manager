@@ -1,6 +1,7 @@
 import pytest
 
 from src.core.database import db
+from src.repository.attachment import AttachmentRepository
 from src.repository.base import BaseRepository
 from src.repository.list import ListRepository
 from src.repository.notification import NotificationRepository
@@ -38,3 +39,8 @@ async def user_repo(create_pool) -> UserRepository:
 @pytest.fixture
 async def notification_repo(create_pool) -> NotificationRepository:
     return NotificationRepository(pool=create_pool.pool)
+
+
+@pytest.fixture
+async def attachment_repo(create_pool) -> AttachmentRepository:
+    return AttachmentRepository(pool=create_pool.pool)

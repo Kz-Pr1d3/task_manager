@@ -50,3 +50,12 @@ prometheusdata/
 
 # Redis
 redisdata/
+
+# MinIO
+miniodata/
+
+# LibreOffice / OpenOffice lock files
+.~lock.*
+
+# Local Junie plans
+.junie/

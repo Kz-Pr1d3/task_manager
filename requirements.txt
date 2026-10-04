@@ -20,6 +20,9 @@ itsdangerous==2.2.0
 # Cache & sessions
 redis==5.2
 
+# Object storage (S3 / MinIO)
+aiobotocore>=2.15
+
 # Message broker
 aio-pika==9.4
 

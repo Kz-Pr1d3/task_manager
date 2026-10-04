@@ -1,0 +1,21 @@
+# One-shot init: бакет + private + CORS + lifecycle (mc с GitHub releases).
+# Сборка: docker compose build minio-init
+
+ARG MC_VERSION=RELEASE.2025-08-13T08-35-41Z
+ARG TARGETARCH=amd64
+
+FROM alpine:3.20 AS download
+ARG MC_VERSION
+ARG TARGETARCH
+RUN apk add --no-cache curl ca-certificates \
+    && curl -fL -o /mc \
+      "https://github.com/minio/mc/releases/download/${MC_VERSION}/mc.linux-${TARGETARCH}.${MC_VERSION}" \
+    && chmod +x /mc
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates curl bash
+COPY --from=download /mc /usr/local/bin/mc
+COPY scripts/minio-init.sh /scripts/minio-init.sh
+COPY scripts/minio /scripts/minio
+RUN chmod +x /scripts/minio-init.sh
+ENTRYPOINT ["/scripts/minio-init.sh"]

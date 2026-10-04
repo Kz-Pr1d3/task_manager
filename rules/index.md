@@ -14,9 +14,12 @@
 В каждом плане есть секция **«Статус реализации»** — сверяй с кодом перед работой.
 
 - [development_plans/auth_dev.md](development_plans/auth_dev.md) — авторизация (sign-up/in/refresh/logout ✅)
-- [development_plans/tasks_dev.md](development_plans/tasks_dev.md) — задачи/списки (CRUD+lifecycle+delete list ✅, views ❌)
-- [development_plans/tasks_tech.md](development_plans/tasks_tech.md) — задачи: API, БД, технические заметки
-- [development_plans/notifications_mvp.md](development_plans/notifications_mvp.md) — realtime-уведомления (шаги 1–5 ✅)
+- [development_plans/tasks/tasks_dev.md](development_plans/tasks/tasks_dev.md) — задачи/списки (CRUD+lifecycle+delete list ✅, views ❌)
+- [development_plans/tasks/tasks_tech.md](development_plans/tasks/tasks_tech.md) — задачи: API, БД, технические заметки
+- [development_plans/notifications/notifications_mvp.md](development_plans/notifications/notifications_mvp.md) — realtime-уведомления (шаги 1–5 ✅)
+- [development_plans/s3/s3_dev.md](development_plans/s3/s3_dev.md) — S3 / MinIO, вложения к задачам (presigned) ✅ код (шаг 8 ⏭ нет прода)
+- [development_plans/s3/s3_multipart_dev.md](development_plans/s3/s3_multipart_dev.md) — multipart upload > 100 MiB (max 300 MiB) ❌ план
+- [development_plans/nginx/nginx_dev.md](development_plans/nginx/nginx_dev.md) — Nginx reverse proxy + X-Accel-Redirect → S3 ❌ план
 
 ### Обновление правил
 

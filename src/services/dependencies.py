@@ -5,12 +5,15 @@ from fastapi import Depends, Request
 
 from src.core.cache import get_redis
 from src.core.redis_notification_bus import RedisNotificationBus
+from src.core.s3 import S3Storage, get_s3_storage
 from src.repository.dependencies import (
+    AttachmentRepoDep,
     UserRepoDep,
     ListRepoDep,
     TaskRepoDep,
     NotificationRepoDep,
 )
+from src.services.attachment import AttachmentService
 from src.services.auth import AuthService
 from src.services.list import ListService
 from src.services.notification import NotificationService
@@ -61,6 +64,29 @@ def get_notification_service(repo: NotificationRepoDep) -> NotificationService:
     return NotificationService(repository=repo)
 
 
+def get_s3_storage_dep() -> S3Storage:
+    """
+    FastAPI-зависимость глобального ``S3Storage`` (lifespan).
+
+    :returns: экземпляр ``S3Storage``.
+    """
+    return get_s3_storage()
+
+
+def get_attachment_service(
+        repo: AttachmentRepoDep,
+        s3: Annotated[S3Storage, Depends(get_s3_storage_dep)],
+) -> AttachmentService:
+    """
+    Фабрика FastAPI-зависимости AttachmentService.
+
+    :param repo: репозиторий вложений.
+    :param s3: хранилище S3/MinIO.
+    :returns: экземпляр ``AttachmentService``.
+    """
+    return AttachmentService(repository=repo, s3=s3)
+
+
 def get_notification_bus(request: Request) -> RedisNotificationBus:
     """
     Достаёт ``RedisNotificationBus`` из ``app.state`` (lifespan).
@@ -75,4 +101,5 @@ AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 ListServiceDep = Annotated[ListService, Depends(get_list_service)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
 NotificationServiceDep = Annotated[NotificationService, Depends(get_notification_service)]
+AttachmentServiceDep = Annotated[AttachmentService, Depends(get_attachment_service)]
 NotificationBusDep = Annotated[RedisNotificationBus, Depends(get_notification_bus)]

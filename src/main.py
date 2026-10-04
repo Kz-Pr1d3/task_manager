@@ -14,6 +14,7 @@ from src.core.config import configs
 from src.core.database import db
 from src.core.keys import Keys
 from src.core.redis_notification_bus import RedisNotificationBus
+from src.core.s3 import S3Storage, create_s3_client_cm, set_s3_storage
 from src.core.sse_hub import SSEHub
 from src.middleware.logging import LoggingMiddleware
 from src.middleware.metrics import MetricsMiddleware
@@ -23,10 +24,11 @@ from src.middleware.tracing import TracingMiddleware, setup_tracing
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
     """
-    Startup/shutdown: keys, DB pool, Redis, SSEHub, Redis bus listener.
+    Startup/shutdown: keys, DB pool, Redis, S3, SSEHub, Redis bus listener.
 
     Redis client без ``decode_responses`` (как ticket GETDEL / auth).
     Bus сам нормализует bytes/str в pubsub.
+    S3-клиент — один на процесс (aiobotocore path-style).
 
     :param app: экземпляр FastAPI.
     """
@@ -50,18 +52,25 @@ async def app_lifespan(app: FastAPI):
     app.state.sse_hub = sse_hub
     app.state.notification_bus = notification_bus
 
-    try:
-        yield
-    finally:
-        listener_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await listener_task
+    async with create_s3_client_cm() as s3_client:
+        s3_storage = S3Storage(client=s3_client, bucket=configs.s3_bucket)
+        set_s3_storage(s3_storage)
+        app.state.s3_storage = s3_storage
+        try:
+            yield
+        finally:
+            listener_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await listener_task
 
-        await db.disconnect()
+            await db.disconnect()
 
-        if cache.redis_client:
-            await cache.redis_client.aclose()
-            cache.redis_client = None
+            if cache.redis_client:
+                await cache.redis_client.aclose()
+                cache.redis_client = None
+
+            set_s3_storage(None)
+            app.state.s3_storage = None
 
 
 class AppCreator:

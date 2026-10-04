@@ -1,0 +1,10 @@
+{
+  "Rules": [
+    {
+      "ID": "drop-abandoned-tmp",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "tmp/pending/" },
+      "Expiration": { "Days": 1 }
+    }
+  ]
+}

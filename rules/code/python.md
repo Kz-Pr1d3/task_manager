@@ -78,11 +78,26 @@ row = await self.one(query, lock_ns, lock_key, user_id, list_id, title, limit)
 **Обязательно:**
 - параметры `$1…$n`, без f-string интерполяции значений;
 - фильтр владельца (`user_id`) в SQL, не только в сервисе;
-- advisory lock внутри того же CTE/транзакции, что и лимит-мутация.
+- advisory lock внутри того же CTE/транзакции, что и лимит-мутация;
+- **timestamps для записи/сравнения в запросах — из Python**, не `now()` в SQL.
+  Генерируй ``datetime.now(timezone.utc)`` (или cutoff = now − TTL) и передавай
+  параметром ``$n::timestamptz``. Так время едино с приложением и предсказуемо в тестах.
+  Эталон: `ListRepository.delete_list`. ``DEFAULT now()`` в DDL на INSERT без
+  явного поля — ок (серверная метка создания).
+
+```python
+now = datetime.now(timezone.utc)
+# …
+# SET ready_at = $4::timestamptz
+# WHERE created_at < $5::timestamptz
+row = await self.one(query, …, now, cutoff)
+```
 
 **Нельзя:**
 - count → insert двумя round-trip без lock (гонка лимита);
-- «сначала SELECT в Python, потом решить» для write-path с проверками.
+- «сначала SELECT в Python, потом решить» для write-path с проверками;
+- ``ready_at = now()`` / ``created_at < now() - $1::interval`` в application SQL —
+  используй Python UTC.
 
 ### 4. Обработка ошибок
 
@@ -94,6 +109,8 @@ row = await self.one(query, lock_ns, lock_key, user_id, list_id, title, limit)
 | `UnauthorizedException` | 401 |
 | `NotFoundException` | 404 |
 | `ConflictException` | 409 |
+| `PayloadTooLargeException` | 413 |
+| `UnprocessableEntityException` | 422 |
 
 Новые исключения добавляй только туда, наследуй от `AppException`. Не используй «голый» `HTTPException` в сервисах/core.
 

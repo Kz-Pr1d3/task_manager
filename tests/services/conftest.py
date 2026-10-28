@@ -4,11 +4,22 @@ from botocore.exceptions import ClientError
 from src.core.config import configs
 from src.core.database import db
 from src.core.s3 import S3Storage, create_s3_client_cm
+from src.models.enums import AttachmentDownloadMode
 from src.repository.attachment import AttachmentRepository
 from src.repository.base import BaseRepository
 from src.repository.notification import NotificationRepository
 from src.services.attachment import AttachmentService
 from src.services.notification import NotificationService
+
+
+@pytest.fixture(autouse=True)
+def download_mode_presigned(monkeypatch: pytest.MonkeyPatch):
+    """Service-тесты по умолчанию в режиме presigned, даже если в .env x_accel."""
+    monkeypatch.setattr(
+        configs,
+        "attachment_download_mode",
+        AttachmentDownloadMode.presigned,
+    )
 
 
 @pytest.fixture

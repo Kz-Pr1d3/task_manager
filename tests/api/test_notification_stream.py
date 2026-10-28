@@ -4,6 +4,10 @@ from starlette.testclient import TestClient
 
 from src.core import cache
 from src.core.security import Security
+from tests.conftest import API_PREFIX
+
+_STREAM = f"{API_PREFIX}/v1/notifications/stream"
+_TICKET = f"{API_PREFIX}/v1/notifications/sse-ticket"
 
 
 @pytest.fixture
@@ -40,26 +44,26 @@ def finite_sse_stream(monkeypatch: pytest.MonkeyPatch):
 
 
 def test__stream__without_ticket_unauthorized(sse_client: TestClient):
-    response = sse_client.get("/v1/notifications/stream")
+    response = sse_client.get(_STREAM)
     assert response.status_code == 401
 
 
 def test__stream__invalid_ticket_unauthorized(sse_client: TestClient):
     response = sse_client.get(
-        "/v1/notifications/stream",
+        _STREAM,
         params={"ticket": "not-a-real-ticket"},
     )
     assert response.status_code == 401
 
 
 def test__sse_ticket__unauthorized(sse_client: TestClient):
-    response = sse_client.post("/v1/notifications/sse-ticket")
+    response = sse_client.post(_TICKET)
     assert response.status_code == 401
 
 
 def test__sse_ticket__success(sse_client: TestClient, auth_headers: dict[str, str]):
     response = sse_client.post(
-        "/v1/notifications/sse-ticket",
+        _TICKET,
         headers=auth_headers,
     )
     assert response.status_code == 200
@@ -74,14 +78,14 @@ def test__stream__content_type_and_ready(
         finite_sse_stream,
 ):
     ticket_response = sse_client.post(
-        "/v1/notifications/sse-ticket",
+        _TICKET,
         headers=auth_headers,
     )
     assert ticket_response.status_code == 200
     ticket = ticket_response.json()["ticket"]
 
     response = sse_client.get(
-        "/v1/notifications/stream",
+        _STREAM,
         params={"ticket": ticket},
     )
     assert response.status_code == 200
@@ -98,19 +102,19 @@ def test__stream__ticket_is_single_use(
         finite_sse_stream,
 ):
     ticket = sse_client.post(
-        "/v1/notifications/sse-ticket",
+        _TICKET,
         headers=auth_headers,
     ).json()["ticket"]
 
     first = sse_client.get(
-        "/v1/notifications/stream",
+        _STREAM,
         params={"ticket": ticket},
     )
     assert first.status_code == 200
     assert "event: ready" in first.text
 
     reuse = sse_client.get(
-        "/v1/notifications/stream",
+        _STREAM,
         params={"ticket": ticket},
     )
     assert reuse.status_code == 401

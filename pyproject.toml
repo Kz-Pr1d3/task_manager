@@ -17,7 +17,12 @@ known-first-party = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = [".", "src"]
+markers = [
+    "smoke: full stack via nginx :8080 (compose + uvicorn + ATTACHMENT_DOWNLOAD_MODE=x_accel)",
+]
+# smoke не в обычном прогоне — явно: pytest -m smoke
+addopts = "-m 'not smoke'"
 
 [tool.ty]
 src = ["src"]

@@ -24,7 +24,10 @@ class UserRepository(BaseRepository):
         :param password: уже захэшированный пароль.
         :returns: созданный ``User`` или ``None`` при сбое INSERT.
         """
-        query = "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email"
+        query = (
+            "INSERT INTO users (email, password) VALUES ($1, $2) "
+            "RETURNING id, email, password, created_at"
+        )
         row = await self.one(query, email, password)
         if row is not None:
             return self.user_model(**row)

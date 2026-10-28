@@ -3,6 +3,7 @@
 import pytest
 from botocore.exceptions import ClientError
 
+from src.core.config import configs
 from src.core.exceptions import (
     ConflictException,
     NotFoundException,
@@ -10,12 +11,48 @@ from src.core.exceptions import (
     UnprocessableEntityException,
 )
 from src.core.s3 import S3Storage
-from src.models.enums import AttachmentStatus
+from src.models.attachments import DownloadAccelResult, DownloadUrlResult, TaskAttachment
+from src.models.enums import AttachmentDownloadMode, AttachmentStatus
 from src.repository.attachment import AttachmentRepository
 from src.repository.base import BaseRepository
 from src.services.attachment import AttachmentService
 
 INBOX_LIST_ID = 1
+
+
+async def _ready_png(
+        service: AttachmentService,
+        s3_storage: S3Storage,
+        *,
+        user_id: int,
+        task_id: int,
+        filename: str = "pic.png",
+        body: bytes = b"png!",
+) -> TaskAttachment:
+    """initiate → PUT → complete для готового PNG-вложения."""
+    initiated = await service.initiate_upload(
+        user_id=user_id,
+        task_id=task_id,
+        filename=filename,
+        content_type="image/png",
+        size_bytes=len(body),
+    )
+    pending = await service.repository.get_by_id(
+        attachment_id=initiated.id,
+        task_id=task_id,
+        user_id=user_id,
+    )
+    assert pending is not None
+    await s3_storage.put_object(
+        pending.storage_key,
+        body,
+        content_type="image/png",
+    )
+    return await service.complete_upload(
+        user_id=user_id,
+        task_id=task_id,
+        attachment_id=initiated.id,
+    )
 
 
 @pytest.fixture
@@ -279,34 +316,38 @@ async def test__complete_upload__oversize_head(
         await s3_storage.head_object(pending.storage_key)
 
 
+def test__path_and_query_from_url__strips_host():
+    url = (
+        "http://minio:9000/task-manager-media/users/1/a.png"
+        "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc"
+    )
+    assert AttachmentService.path_and_query_from_url(url) == (
+        "/task-manager-media/users/1/a.png"
+        "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc"
+    )
+
+
+def test__build_x_accel_redirect__joins_prefix():
+    service = AttachmentService.__new__(AttachmentService)
+    service.settings = configs.model_copy(
+        update={"s3_x_accel_prefix": "/internal-s3"},
+    )
+    assert service.build_x_accel_redirect(
+        "/bucket/key?X-Amz-Signature=x",
+    ) == "/internal-s3/bucket/key?X-Amz-Signature=x"
+
+
 async def test__get_download_url__ready(
         attachment_service: AttachmentService,
         s3_storage: S3Storage,
         test_user_id: int,
         task_id: int,
 ):
-    initiated = await attachment_service.initiate_upload(
+    ready = await _ready_png(
+        attachment_service,
+        s3_storage,
         user_id=test_user_id,
         task_id=task_id,
-        filename="pic.png",
-        content_type="image/png",
-        size_bytes=4,
-    )
-    pending = await attachment_service.repository.get_by_id(
-        attachment_id=initiated.id,
-        task_id=task_id,
-        user_id=test_user_id,
-    )
-    assert pending is not None
-    await s3_storage.put_object(
-        pending.storage_key,
-        b"png!",
-        content_type="image/png",
-    )
-    ready = await attachment_service.complete_upload(
-        user_id=test_user_id,
-        task_id=task_id,
-        attachment_id=initiated.id,
     )
 
     download = await attachment_service.get_download_url(
@@ -314,8 +355,47 @@ async def test__get_download_url__ready(
         task_id=task_id,
         attachment_id=ready.id,
     )
+    assert isinstance(download, DownloadUrlResult)
     assert download.url.startswith("http")
     assert download.expires_in == attachment_service.settings.s3_presigned_get_ttl_sec
+
+    await s3_storage.delete_object(ready.storage_key)
+
+
+async def test__get_download_url__x_accel(
+        attachment_repo: AttachmentRepository,
+        s3_storage: S3Storage,
+        test_user_id: int,
+        task_id: int,
+):
+    settings = configs.model_copy(
+        update={"attachment_download_mode": AttachmentDownloadMode.x_accel},
+    )
+    service = AttachmentService(
+        repository=attachment_repo,
+        s3=s3_storage,
+        settings=settings,
+    )
+    ready = await _ready_png(
+        service,
+        s3_storage,
+        user_id=test_user_id,
+        task_id=task_id,
+    )
+
+    download = await service.get_download_url(
+        user_id=test_user_id,
+        task_id=task_id,
+        attachment_id=ready.id,
+    )
+    assert isinstance(download, DownloadAccelResult)
+    assert download.x_accel_redirect.startswith("/internal-s3/")
+    assert "X-Amz-Signature=" in download.x_accel_redirect
+    assert "localhost:9000" not in download.x_accel_redirect
+    assert configs.s3_endpoint_url not in download.x_accel_redirect
+    assert download.content_type == "image/png"
+    assert 'filename="pic.png"' in download.content_disposition
+    assert download.expires_in == settings.s3_presigned_get_ttl_sec
 
     await s3_storage.delete_object(ready.storage_key)
 

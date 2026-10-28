@@ -3,6 +3,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.models.enums import AttachmentDownloadMode
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
@@ -35,6 +37,12 @@ class Configs(BaseSettings):
     s3_bucket: str = "task-manager-media"
     s3_presigned_put_ttl_sec: int = 600
     s3_presigned_get_ttl_sec: int = 120
+    # Host для SigV4 GET под nginx→MinIO (не клиентский S3_ENDPOINT_URL)
+    s3_x_accel_endpoint_url: str = "http://minio:9000"
+    # Должен совпадать с location /internal-s3/ в docker/nginx/nginx.conf
+    s3_x_accel_prefix: str = "/internal-s3"
+    # ATTACHMENT_DOWNLOAD_MODE — presigned (pytest/uvicorn) | x_accel (через nginx)
+    attachment_download_mode: AttachmentDownloadMode = AttachmentDownloadMode.presigned
     attachment_max_bytes: int = 10_485_760  # 10 MiB
     attachment_max_per_task: int = 5
     # ATTACHMENT_PENDING_TTL — возраст pending до чистки БД (default 24h)

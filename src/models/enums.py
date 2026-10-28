@@ -39,3 +39,10 @@ class AttachmentWriteStatus(str, Enum):
     ok = "ok"
     forbidden = "forbidden"  # задача недоступна / чужая
     limit = "limit"  # лимит файлов на задачу
+
+
+class AttachmentDownloadMode(str, Enum):
+    """Режим download: 307 presigned GET или X-Accel-Redirect через nginx."""
+
+    presigned = "presigned"
+    x_accel = "x_accel"

@@ -35,6 +35,9 @@ htmlcov/
 # Local Cursor rules
 .cursor/rules/venv-activation.mdc
 
+# MCP / local logs
+*.log
+
 # Keys
 keys/
 

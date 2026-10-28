@@ -14,22 +14,30 @@ S3Client = Any
 _s3_storage: "S3Storage | None" = None
 
 
-def create_s3_client_cm(settings: Configs | None = None):
+def create_s3_client_cm(
+        settings: Configs | None = None,
+        *,
+        endpoint_url: str | None = None,
+):
     """
-    Async context manager долгоживущего S3-клиента (path-style).
+    Async context manager S3-клиента (path-style).
 
     :param settings: настройки; по умолчанию глобальный ``configs``.
+    :param endpoint_url: override host (для short-lived подписи X-Accel).
     :returns: ``ClientCreatorContext`` aiobotocore.
     """
     settings = settings or configs
     session = get_session()
     return session.create_client(
         "s3",
-        endpoint_url=settings.s3_endpoint_url,
+        endpoint_url=endpoint_url or settings.s3_endpoint_url,
         aws_access_key_id=settings.s3_access_key_id,
         aws_secret_access_key=settings.s3_secret_access_key,
         region_name=settings.s3_region,
-        config=AioConfig(s3={"addressing_style": "path"}),
+        config=AioConfig(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+        ),
     )
 
 
@@ -113,6 +121,8 @@ class S3Storage:
         expires_in: int,
         content_type: str | None = None,
         response_content_disposition: str | None = None,
+        endpoint_url: str | None = None,
+        settings: Configs | None = None,
     ) -> str:
         """
         Presigned URL (aiobotocore async).
@@ -122,6 +132,9 @@ class S3Storage:
         :param expires_in: TTL в секундах.
         :param content_type: для PUT — Content-Type в Params.
         :param response_content_disposition: для GET — Content-Disposition.
+        :param endpoint_url: если задан — short-lived клиент с этим host
+            (подпись GET под nginx→MinIO без второго пула).
+        :param settings: креды/region для short-lived клиента.
         :returns: URL.
         """
         params: dict[str, Any] = {"Bucket": self.bucket, "Key": key}
@@ -129,11 +142,21 @@ class S3Storage:
             params["ContentType"] = content_type
         if response_content_disposition is not None:
             params["ResponseContentDisposition"] = response_content_disposition
-        return await self._client.generate_presigned_url(
-            ClientMethod=client_method,
-            Params=params,
-            ExpiresIn=expires_in,
-        )
+        if endpoint_url is None:
+            return await self._client.generate_presigned_url(
+                ClientMethod=client_method,
+                Params=params,
+                ExpiresIn=expires_in,
+            )
+        async with create_s3_client_cm(
+                settings,
+                endpoint_url=endpoint_url,
+        ) as client:
+            return await client.generate_presigned_url(
+                ClientMethod=client_method,
+                Params=params,
+                ExpiresIn=expires_in,
+            )
 
     async def ensure_bucket(self) -> None:
         """Создаёт бакет, если его ещё нет (idempotent для MinIO/dev)."""

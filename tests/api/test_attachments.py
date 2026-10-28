@@ -10,6 +10,8 @@ from starlette.testclient import TestClient
 
 from src.core.config import configs
 from src.core.security import Security
+from src.models.enums import AttachmentDownloadMode
+from tests.conftest import API_PREFIX
 
 INBOX_LIST_ID = 1
 
@@ -24,6 +26,25 @@ def auth_headers(test_user_id: int) -> dict[str, str]:
 def other_auth_headers() -> dict[str, str]:
     access, _ = Security.create_tokens(user_id=99999)
     return {"Authorization": f"Bearer {access}"}
+
+
+@pytest.fixture(autouse=True)
+def download_mode_presigned(monkeypatch: pytest.MonkeyPatch):
+    """API-тесты по умолчанию в режиме 307, даже если в .env x_accel."""
+    monkeypatch.setattr(
+        configs,
+        "attachment_download_mode",
+        AttachmentDownloadMode.presigned,
+    )
+
+
+@pytest.fixture
+def download_mode_x_accel(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        configs,
+        "attachment_download_mode",
+        AttachmentDownloadMode.x_accel,
+    )
 
 
 @pytest.fixture
@@ -62,23 +83,23 @@ async def task_id(test_user_id: int):
 
 
 def _upload_url(task_id: int) -> str:
-    return f"/v1/tasks/{task_id}/attachments/upload"
+    return f"{API_PREFIX}/v1/tasks/{task_id}/attachments/upload"
 
 
 def _attachments_url(task_id: int) -> str:
-    return f"/v1/tasks/{task_id}/attachments/"
+    return f"{API_PREFIX}/v1/tasks/{task_id}/attachments/"
 
 
 def _complete_url(task_id: int, attachment_id: int) -> str:
-    return f"/v1/tasks/{task_id}/attachments/{attachment_id}/complete"
+    return f"{API_PREFIX}/v1/tasks/{task_id}/attachments/{attachment_id}/complete"
 
 
 def _download_url(task_id: int, attachment_id: int) -> str:
-    return f"/v1/tasks/{task_id}/attachments/{attachment_id}/download"
+    return f"{API_PREFIX}/v1/tasks/{task_id}/attachments/{attachment_id}/download"
 
 
 def _delete_url(task_id: int, attachment_id: int) -> str:
-    return f"/v1/tasks/{task_id}/attachments/{attachment_id}"
+    return f"{API_PREFIX}/v1/tasks/{task_id}/attachments/{attachment_id}"
 
 
 def test__list_attachments__unauthorized(client: TestClient, task_id: int):
@@ -352,6 +373,69 @@ def test__download__pending_conflict(
         follow_redirects=False,
     )
     assert response.status_code == 409
+
+
+def test__download__x_accel_headers(
+        client: TestClient,
+        auth_headers: dict[str, str],
+        task_id: int,
+        download_mode_x_accel,
+):
+    body = b"%PDF-1.4xaccel"
+    content_type = "application/pdf"
+
+    initiated = client.post(
+        _upload_url(task_id),
+        headers=auth_headers,
+        json={
+            "filename": "accel.pdf",
+            "content_type": content_type,
+            "size_bytes": len(body),
+        },
+    )
+    assert initiated.status_code == 200
+    upload = initiated.json()
+    attachment_id = upload["id"]
+
+    put = httpx.put(
+        upload["upload_url"],
+        content=body,
+        headers={"Content-Type": content_type},
+        timeout=10.0,
+    )
+    if put.status_code >= 400:
+        pytest.skip(f"MinIO PUT failed: {put.status_code} {put.text}")
+    assert put.status_code in {200, 204}
+
+    completed = client.post(
+        _complete_url(task_id, attachment_id),
+        headers=auth_headers,
+    )
+    assert completed.status_code == 200
+
+    download = client.get(
+        _download_url(task_id, attachment_id),
+        headers=auth_headers,
+        follow_redirects=False,
+    )
+    assert download.status_code == 200
+    assert download.content == b""
+    assert download.headers.get("cache-control") == "no-store"
+    assert "location" not in download.headers
+
+    accel = download.headers.get("x-accel-redirect")
+    assert accel is not None
+    assert accel.startswith("/internal-s3/")
+    assert "X-Amz-Signature=" in accel
+    assert "localhost:9000" not in accel
+    assert configs.s3_endpoint_url not in accel
+
+    assert download.headers.get("content-type", "").startswith("application/pdf")
+    disposition = download.headers.get("content-disposition", "")
+    assert "attachment;" in disposition
+    assert "accel.pdf" in disposition
+
+    client.delete(_delete_url(task_id, attachment_id), headers=auth_headers)
 
 
 def test__delete__not_found(

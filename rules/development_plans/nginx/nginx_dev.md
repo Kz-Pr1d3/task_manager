@@ -10,20 +10,21 @@
 
 ## Статус реализации (код)
 
-Обновлено: 2026-10-04.
+Обновлено: 2026-10-29.
 
 | Область | Статус | Что есть |
 |---------|--------|----------|
 | Решения / контракт | ✅ | этот документ |
-| `docker/nginx/` + сервис в compose | ❌ | nginx в проекте нет |
-| Базовый reverse proxy → API | ❌ | API сейчас с хоста напрямую |
-| `location /internal-s3/` + `internal` | ❌ | |
-| Download: `X-Accel-Redirect` вместо 307 | ❌ | сейчас 307 → presigned GET |
-| Feature flag / режим download | ❌ | |
-| Тесты (заголовки, 404, без обхода internal) | ❌ | |
-| limit_req / real_ip / SSE proxy | ⏭ | отдельный план / шаг позже (§22–§24, README TODO) |
+| `docker/nginx/` + сервис в compose | ✅ | `docker/nginx/nginx.conf`, сервис `nginx` :8080 |
+| Базовый reverse proxy → API | ✅ | upstream `host.docker.internal:8000` |
+| `location /internal-s3/` + `internal` | ✅ | `internal;`; прямой GET снаружи → 404 (smoke) |
+| Download: `X-Accel-Redirect` вместо 307 | ✅ | режим `x_accel`; default `presigned` (pytest / прямой uvicorn) |
+| Feature flag / режим download | ✅ | `ATTACHMENT_DOWNLOAD_MODE` + `S3_X_ACCEL_*` |
+| Тесты (заголовки, 404, без обхода internal) | ✅ | service/API x_accel; foreign/pending/presigned без регрессии; smoke `pytest -m smoke` / `scripts/smoke_nginx_download.sh` |
+| Документация (s3_dev, index, README TODO #3) | ✅ | download → этот план; TODO #3 зачёркнут, limits/SSE отдельно |
+| limit_req / real_ip / SSE proxy | ⏭ | SSE → [nginx_sse_dev.md](nginx_sse_dev.md); limits → `nginx_limits_dev.md` (§22–§24) |
 
-**Этап:** план зафиксирован, реализация не начата.
+**Этап:** шаги 1–4 ✅. План закрыт; дальше — [nginx_sse_dev.md](nginx_sse_dev.md) / `nginx_limits_dev.md`.
 
 ---
 
@@ -148,7 +149,7 @@ server {
     location / {
         client_max_body_size 16k;          # §26: не раздувать глобально
         proxy_http_version 1.1;
-        proxy_set_header Host              $host;
+        proxy_set_header Host              $http_host;  # с портом; иначе Location теряет :8080
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -225,32 +226,32 @@ API в compose пока нет — `upstream` на хост. Когда появ
 
 ### Шаг 1 — nginx reverse proxy в Docker
 
-- [ ] `docker/nginx/nginx.conf` (upstream API + `/internal-s3/`)
-- [ ] сервис `nginx` в `docker-compose.yml`
-- [ ] README: «API через http://localhost:8080»
-- [ ] Ручная проверка: `curl -H "Authorization: ..." http://localhost:8080/v1/...` → JSON как напрямую с :8000
+- [x] `docker/nginx/nginx.conf` (upstream API + `/internal-s3/`)
+- [x] сервис `nginx` в `docker-compose.yml`
+- [x] README: «API через http://localhost:8080»
+- [x] Ручная проверка: `curl -H "Authorization: ..." http://localhost:8080/v1/...` → JSON как напрямую с :8000
 
 ### Шаг 2 — конфиг + сервис X-Accel
 
-- [ ] Env / `Configs`
-- [ ] Логика сборки `X-Accel-Redirect` + подпись на `S3_X_ACCEL_ENDPOINT_URL`
-- [ ] API response branch
-- [ ] Default: dev может оставить `presigned` до поднятого nginx; в compose-доке рекомендовать `x_accel`
+- [x] Env / `Configs`
+- [x] Логика сборки `X-Accel-Redirect` + подпись на `S3_X_ACCEL_ENDPOINT_URL`
+- [x] API response branch
+- [x] Default: dev может оставить `presigned` до поднятого nginx; в compose-доке рекомендовать `x_accel`
 
 ### Шаг 3 — тесты
 
-- [ ] Unit/service: при `x_accel` заголовок начинается с `/internal-s3/`, есть query `X-Amz-Signature`, нет утечки `s3_endpoint` в Location
-- [ ] API: 200 + `X-Accel-Redirect` (без follow через реальный nginx — достаточно заголовков)
-- [ ] API: foreign → 404; pending → 409 (как сейчас)
-- [ ] Режим `presigned` — старые тесты 307 не краснеют
-- [ ] (Опционально) compose smoke: curl через nginx получает байты файла
+- [x] Unit/service: при `x_accel` заголовок начинается с `/internal-s3/`, есть query `X-Amz-Signature`, нет утечки `s3_endpoint` в Location
+- [x] API: 200 + `X-Accel-Redirect` (без follow через реальный nginx — достаточно заголовков)
+- [x] API: foreign → 404; pending → 409 (как сейчас)
+- [x] Режим `presigned` — старые тесты 307 не краснеют
+- [x] compose smoke: `scripts/smoke_nginx_download.sh` + `pytest -m smoke`
 
 ### Шаг 4 — документация / правила
 
-- [ ] Статус-таблица в этом файле → ✅
-- [ ] [s3_dev.md](../s3/s3_dev.md): download — ссылка сюда; убрать «X-Accel вне MVP»
-- [ ] [index.md](../../index.md) — пункт nginx
-- [ ] README TODO #3 — частично: proxy + X-Accel; limits/SSE отдельно
+- [x] Статус-таблица в этом файле → ✅
+- [x] [s3_dev.md](../s3/s3_dev.md): download — ссылка сюда; убрать «X-Accel вне MVP»
+- [x] [index.md](../../index.md) — пункт nginx
+- [x] README TODO #3 — частично: proxy + X-Accel; limits/SSE отдельно
 
 ---
 
@@ -296,19 +297,20 @@ API в compose пока нет — `upstream` на хост. Когда появ
 
 ## Критерии готовности
 
-- [ ] `curl` download через nginx отдаёт тело файла, в ответе API-этапа был X-Accel (в access log nginx — internal redirect)
-- [ ] Прямой GET `/internal-s3/...` снаружи → 404
-- [ ] Presigned-режим и существующие attachment-тесты живы
-- [ ] Upload по-прежнему напрямую в MinIO
-- [ ] План и index обновлены
+- [x] `curl` download через nginx отдаёт тело файла, в ответе API-этапа был X-Accel (в access log nginx — internal redirect)
+- [x] Прямой GET `/internal-s3/...` снаружи → 404
+- [x] Presigned-режим и существующие attachment-тесты живы
+- [x] Upload по-прежнему напрямую в MinIO
+- [x] План и index обновлены
 
 ---
 
 ## Вне скоупа → следующие планы
 
-1. **`nginx_limits_dev.md`** — `limit_req` / `limit_req_status 429` / zones login vs api / dry_run (§22, §27), `real_ip` (§24).
-2. **SSE/WebSocket proxy** — buffering off, timeouts (notifications + будущий chat).
-3. **Закрыть MinIO с хоста** — только docker-network + (если нужен browser PUT) отдельный nginx location или остаться на presigned с публичным endpoint.
+1. **[nginx_sse_dev.md](nginx_sse_dev.md)** — SSE location: `proxy_buffering off`, timeout 1h (notifications).
+2. **`nginx_limits_dev.md`** — `limit_req` / `limit_req_status 429` / zones login vs api / dry_run (§22, §27), `real_ip` (§24).
+3. **WebSocket proxy** — когда появится chat (`Upgrade`); не смешивать с SSE `Connection ""`.
+4. **Закрыть MinIO с хоста** — только docker-network + (если нужен browser PUT) отдельный nginx location или остаться на presigned с публичным endpoint.
 
 ---
 
@@ -318,4 +320,4 @@ API в compose пока нет — `upstream` на хост. Когда появ
 |--------|--------|-------|
 | Через приложение | client → nginx → worker → S3 | не берём |
 | Presigned GET 307 | client → S3 напрямую | было / fallback |
-| X-Accel-Redirect | client → nginx → S3 | **цель этого плана** |
+| X-Accel-Redirect | client → nginx → S3 | **сделано** |

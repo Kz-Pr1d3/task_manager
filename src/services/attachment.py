@@ -3,6 +3,7 @@
 import logging
 import uuid
 from pathlib import PurePosixPath
+from urllib.parse import urlparse
 
 from botocore.exceptions import ClientError
 
@@ -15,11 +16,17 @@ from src.core.exceptions import (
 )
 from src.core.s3 import S3Storage
 from src.models.attachments import (
+    DownloadAccelResult,
+    DownloadResult,
     DownloadUrlResult,
     InitiateUploadResponse,
     TaskAttachment,
 )
-from src.models.enums import AttachmentStatus, AttachmentWriteStatus
+from src.models.enums import (
+    AttachmentDownloadMode,
+    AttachmentStatus,
+    AttachmentWriteStatus,
+)
 from src.repository.attachment import AttachmentRepository
 
 logger = logging.getLogger(__name__)
@@ -135,13 +142,38 @@ class AttachmentService:
     @staticmethod
     def content_disposition(filename: str) -> str:
         """
-        ``Content-Disposition`` для presigned GET.
+        ``Content-Disposition`` для download / presigned GET.
 
         :param filename: имя из БД (уже санитизированное).
         :returns: значение заголовка.
         """
         safe = filename.replace('"', "")
         return f"attachment; filename=\"{safe}\""
+
+    @staticmethod
+    def path_and_query_from_url(url: str) -> str:
+        """
+        Вырезает ``path + query`` из абсолютного URL (без схемы/хоста).
+
+        :param url: полный presigned URL.
+        :returns: ``/bucket/key?X-Amz-...``.
+        """
+        parsed = urlparse(url)
+        if parsed.query:
+            return f"{parsed.path}?{parsed.query}"
+        return parsed.path
+
+    def build_x_accel_redirect(self, path_and_query: str) -> str:
+        """
+        Собирает ``X-Accel-Redirect`` из prefix + path/query MinIO.
+
+        :param path_and_query: ``/bucket/key?...`` (из storage_key / presigned).
+        :returns: URI для nginx ``location /internal-s3/``.
+        """
+        prefix = self.settings.s3_x_accel_prefix.rstrip("/")
+        if not path_and_query.startswith("/"):
+            path_and_query = f"/{path_and_query}"
+        return f"{prefix}{path_and_query}"
 
     def _assert_size_allowed(self, size_bytes: int) -> None:
         """
@@ -363,14 +395,18 @@ class AttachmentService:
             user_id: int,
             task_id: int,
             attachment_id: int,
-    ) -> DownloadUrlResult:
+    ) -> DownloadResult:
         """
-        Presigned GET для ready-вложения.
+        Готовит download ready-вложения: 307-URL или X-Accel заголовки.
+
+        Режим задаётся ``ATTACHMENT_DOWNLOAD_MODE``:
+        - ``presigned`` — полный URL на ``S3_ENDPOINT_URL``;
+        - ``x_accel`` — path+query, подписанные на ``S3_X_ACCEL_ENDPOINT_URL``.
 
         :param user_id: владелец.
         :param task_id: задача.
         :param attachment_id: id вложения.
-        :returns: URL + TTL.
+        :returns: ``DownloadUrlResult`` или ``DownloadAccelResult``.
         :raises NotFoundException: нет / чужое.
         :raises ConflictException: не ready.
         """
@@ -385,13 +421,33 @@ class AttachmentService:
             raise ConflictException(detail=_NOT_READY_DETAIL)
 
         expires_in = self.settings.s3_presigned_get_ttl_sec
+        disposition = self.content_disposition(attachment.original_name)
+        mode = self.settings.attachment_download_mode
+
+        if mode is AttachmentDownloadMode.x_accel:
+            # Подпись под host, с которого nginx ходит в MinIO.
+            # Content-Disposition / Type задаёт API-ответ, не query SigV4.
+            url = await self.s3.generate_presigned_url(
+                "get_object",
+                key=attachment.storage_key,
+                expires_in=expires_in,
+                endpoint_url=self.settings.s3_x_accel_endpoint_url,
+                settings=self.settings,
+            )
+            return DownloadAccelResult(
+                x_accel_redirect=self.build_x_accel_redirect(
+                    self.path_and_query_from_url(url),
+                ),
+                content_type=attachment.content_type,
+                content_disposition=disposition,
+                expires_in=expires_in,
+            )
+
         url = await self.s3.generate_presigned_url(
             "get_object",
             key=attachment.storage_key,
             expires_in=expires_in,
-            response_content_disposition=self.content_disposition(
-                attachment.original_name,
-            ),
+            response_content_disposition=disposition,
         )
         return DownloadUrlResult(url=url, expires_in=expires_in)
 

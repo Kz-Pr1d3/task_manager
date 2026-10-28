@@ -6,6 +6,9 @@ from src.core.config import configs
 from src.core.security import Security
 from src.models.notification import NotificationEvent
 from src.repository.notification import NotificationRepository
+from tests.conftest import API_PREFIX
+
+_NOTIFICATIONS = f"{API_PREFIX}/v1/notifications"
 
 
 @pytest.fixture
@@ -43,12 +46,12 @@ async def seed_notifications(test_user_id: int, auth_headers: dict[str, str]):
 
 
 def test__list_notifications__unauthorized(client: TestClient):
-    response = client.get("/v1/notifications/")
+    response = client.get(f"{_NOTIFICATIONS}/")
     assert response.status_code == 401
 
 
 def test__list_notifications__success(client: TestClient, seed_notifications):
-    response = client.get("/v1/notifications/", headers=seed_notifications)
+    response = client.get(f"{_NOTIFICATIONS}/", headers=seed_notifications)
     assert response.status_code == 200
     data = response.json()
     assert data["has_more"] is False
@@ -59,7 +62,7 @@ def test__list_notifications__success(client: TestClient, seed_notifications):
 
 def test__list_notifications__limit_over_100(client: TestClient, seed_notifications):
     response = client.get(
-        "/v1/notifications/",
+        f"{_NOTIFICATIONS}/",
         headers=seed_notifications,
         params={"limit": 101},
     )
@@ -68,7 +71,7 @@ def test__list_notifications__limit_over_100(client: TestClient, seed_notificati
 
 def test__list_notifications__cursor(client: TestClient, seed_notifications):
     first = client.get(
-        "/v1/notifications/",
+        f"{_NOTIFICATIONS}/",
         headers=seed_notifications,
         params={"limit": 2},
     ).json()
@@ -76,7 +79,7 @@ def test__list_notifications__cursor(client: TestClient, seed_notifications):
     assert first["next_before_id"] == first["items"][-1]["id"]
 
     second = client.get(
-        "/v1/notifications/",
+        f"{_NOTIFICATIONS}/",
         headers=seed_notifications,
         params={"limit": 2, "before_id": first["next_before_id"]},
     ).json()
@@ -86,7 +89,7 @@ def test__list_notifications__cursor(client: TestClient, seed_notifications):
 
 
 def test__unread_count__success(client: TestClient, seed_notifications):
-    response = client.get("/v1/notifications/unread-count", headers=seed_notifications)
+    response = client.get(f"{_NOTIFICATIONS}/unread-count", headers=seed_notifications)
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 3
@@ -95,64 +98,64 @@ def test__unread_count__success(client: TestClient, seed_notifications):
 
 
 def test__mark_read_and_unread__success(client: TestClient, seed_notifications):
-    listed = client.get("/v1/notifications/", headers=seed_notifications).json()
+    listed = client.get(f"{_NOTIFICATIONS}/", headers=seed_notifications).json()
     nid = listed["items"][0]["id"]
 
     read = client.post(
-        "/v1/notifications/read",
+        f"{_NOTIFICATIONS}/read",
         headers=seed_notifications,
         json={"ids": [nid]},
     )
     assert read.status_code == 200
     assert read.json()["updated_ids"] == [nid]
 
-    counts = client.get("/v1/notifications/unread-count", headers=seed_notifications).json()
+    counts = client.get(f"{_NOTIFICATIONS}/unread-count", headers=seed_notifications).json()
     assert counts["total"] == 2
 
     unread = client.post(
-        "/v1/notifications/unread",
+        f"{_NOTIFICATIONS}/unread",
         headers=seed_notifications,
         json={"ids": [nid]},
     )
     assert unread.status_code == 200
     assert unread.json()["updated_ids"] == [nid]
 
-    counts = client.get("/v1/notifications/unread-count", headers=seed_notifications).json()
+    counts = client.get(f"{_NOTIFICATIONS}/unread-count", headers=seed_notifications).json()
     assert counts["total"] == 3
 
 
 def test__mark_read_all__success(client: TestClient, seed_notifications):
     response = client.post(
-        "/v1/notifications/read",
+        f"{_NOTIFICATIONS}/read",
         headers=seed_notifications,
         json={"all": True},
     )
     assert response.status_code == 200
     assert len(response.json()["updated_ids"]) == 3
 
-    counts = client.get("/v1/notifications/unread-count", headers=seed_notifications).json()
+    counts = client.get(f"{_NOTIFICATIONS}/unread-count", headers=seed_notifications).json()
     assert counts["total"] == 0
 
 
 def test__mark_read__cannot_touch_foreign(client: TestClient, seed_notifications, other_auth_headers):
-    listed = client.get("/v1/notifications/", headers=seed_notifications).json()
+    listed = client.get(f"{_NOTIFICATIONS}/", headers=seed_notifications).json()
     nid = listed["items"][0]["id"]
 
     response = client.post(
-        "/v1/notifications/read",
+        f"{_NOTIFICATIONS}/read",
         headers=other_auth_headers,
         json={"ids": [nid]},
     )
     assert response.status_code == 200
     assert response.json()["updated_ids"] == []
 
-    counts = client.get("/v1/notifications/unread-count", headers=seed_notifications).json()
+    counts = client.get(f"{_NOTIFICATIONS}/unread-count", headers=seed_notifications).json()
     assert counts["total"] == 3
 
 
 def test__mark_read__invalid_body(client: TestClient, seed_notifications):
     response = client.post(
-        "/v1/notifications/read",
+        f"{_NOTIFICATIONS}/read",
         headers=seed_notifications,
         json={"ids": [], "all": False},
     )

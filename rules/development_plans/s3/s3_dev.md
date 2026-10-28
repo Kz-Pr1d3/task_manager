@@ -10,7 +10,7 @@
 
 ## Статус реализации (код)
 
-Обновлено: 2026-10-03.
+Обновлено: 2026-10-29.
 
 | Область | Статус | Что есть |
 |---------|--------|----------|
@@ -20,7 +20,7 @@
 | DDL вложений | ✅ | `task_attachment` в `init.sql` |
 | Repository | ✅ | `AttachmentRepository` (create/get/list/mark/delete/count/stale cleanup) |
 | Service | ✅ | `AttachmentService` + `AttachmentCleanupService` |
-| API upload / download / delete | ✅ | `/v1/tasks/{id}/attachments` + 307 + no-store |
+| API upload / download / delete | ✅ | `/v1/tasks/{id}/attachments`; download: 307 presigned или 200 X-Accel ([nginx_dev.md](../nginx/nginx_dev.md)) |
 | CORS на бакете | ✅ | MinIO: `MINIO_API_CORS_ALLOW_ORIGIN`; prod S3: `scripts/minio/cors.json` |
 | Lifecycle (`tmp/`, abort multipart) | ✅ | `mc ilm import` tmp/pending; MinIO stale_uploads 168h |
 | Фоновая чистка `pending` в БД | ✅ | `python -m src.workers.attachment_cleanup`; метрики pending/deleted |
@@ -40,7 +40,7 @@
 | Доступ к объектам | **Приватный бакет**, без публичных ACL | §4–§5 |
 | Загрузка | **Presigned PUT** + шаг **complete** | §7: трафик мимо nginx/воркера |
 | Ограничение размера при заливке | Проверка в API до выдачи URL + **`head_object` после PUT**; опционально Presigned POST | §7–§8: PUT не лимитирует размер подписью |
-| Скачивание | **Presigned GET** → `307 RedirectResponse` | §6 |
+| Скачивание | **307 presigned GET** (pytest / прямой uvicorn) или **X-Accel** через nginx | §6; скрытие endpoint — [nginx_dev.md](../nginx/nginx_dev.md) |
 | Ключ объекта | Генерирует **только сервер** | §1, §7 |
 | Структура ключей | `tmp/pending/{user_id}/{uuid}{ext}` → `users/{user_id}/tasks/{task_id}/{uuid}{ext}` | §11: lifecycle по префиксу `tmp/` |
 | Имя файла пользователя | В БД + `ResponseContentDisposition`; ключ не из user input | §1, §6 |
@@ -95,15 +95,17 @@
 Скачивание:
   GET /tasks/{id}/attachments/{attachment_id}/download
     -> проверка доступа
-    -> presigned GET (Content-Disposition)
-    -> 307 Redirect
+    -> ATTACHMENT_DOWNLOAD_MODE=presigned: 307 Location=<presigned GET>
+    -> ATTACHMENT_DOWNLOAD_MODE=x_accel: 200 + X-Accel-Redirect
+       (nginx → MinIO, без свечения S3 endpoint)
+       см. nginx_dev.md
 
 Удаление:
   DELETE /tasks/{id}/attachments/{attachment_id}
     -> delete_object + DELETE row
 ```
 
-**Не делаем в этом плане:** прокси файла через FastAPI (§6–§7). Скрытие endpoint хранилища при download — [nginx_dev.md](../nginx/nginx_dev.md) (X-Accel-Redirect, §25); upload остаётся presigned PUT.
+**Не делаем в этом плане:** прокси файла через FastAPI (§6–§7). Upload остаётся presigned PUT. Download через nginx (X-Accel-Redirect, §25) — [nginx_dev.md](../nginx/nginx_dev.md), шаги 1–4 ✅.
 
 ---
 
@@ -247,7 +249,7 @@ users/{user_id}/tasks/{task_id}/{uuid4_hex}{suffix_lower}
 | POST | `/upload` | `{ filename, content_type, size_bytes }` | `{ id, upload_url, content_type, expires_in }` |
 | POST | `/{attachment_id}/complete` | — | `{ id, status, size_bytes, ... }` |
 | GET | `/` | — | список `ready` |
-| GET | `/{attachment_id}/download` | — | **307** Location presigned |
+| GET | `/{attachment_id}/download` | — | **307** Location presigned **или** **200** X-Accel ([nginx_dev.md](../nginx/nginx_dev.md)) |
 | DELETE | `/{attachment_id}` | — | 204 |
 
 Ответы с presigned URL: `Cache-Control: no-store` (§6).
@@ -389,7 +391,7 @@ CORS задаём на сервере: `MINIO_API_CORS_ALLOW_ORIGIN` в `docker-
 ## Вне скоупа этого плана
 
 - Rate limiting (Redis) — Часть II docx → отдельный `redis_rate_limit_dev.md`
-- Nginx reverse proxy + X-Accel download — [nginx_dev.md](../nginx/nginx_dev.md); `limit_req` — следующий nginx-план
+- Nginx reverse proxy + X-Accel download — ✅ [nginx_dev.md](../nginx/nginx_dev.md); SSE-safe proxy — [nginx_sse_dev.md](../nginx/nginx_sse_dev.md); `limit_req` — следующий nginx-план
 - Multipart upload > 100 MiB → [s3_multipart_dev.md](s3_multipart_dev.md)
 - Превью/трансcoding изображений
 - Антивирус, CDN, версионирование бакета

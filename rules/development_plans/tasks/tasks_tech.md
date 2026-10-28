@@ -17,8 +17,8 @@
 | `TaskRepository` | ✅ | get/list/create/update/move/lifecycle/count (без subtasks) |
 | `ListService` CRUD | ✅ | лимит 5 → `409`; delete → `404` если нет |
 | `TaskService` | ✅ | get/list/create/update/move/lifecycle (без subtasks) |
-| API lists | ✅ | GET/POST `/v1/lists/`; PATCH rename/reorder; DELETE `/{id}` |
-| API tasks | ✅ | GET/POST `/v1/tasks/`; GET/PATCH/DELETE `/{id}`; move/complete/trash/restore |
+| API lists | ✅ | GET/POST `/api/v1/lists/`; PATCH rename/reorder; DELETE `/{id}` |
+| API tasks | ✅ | GET/POST `/api/v1/tasks/`; GET/PATCH/DELETE `/{id}`; move/complete/trash/restore |
 | API views | ❌ | нет |
 | API create-via-view | ❌ | `/views/today|next7/tasks` |
 | Cursor pagination (физ. списки) | ✅ | `list_tasks` + `TaskPage` |
@@ -33,7 +33,7 @@
 |----------|------|
 | `PATCH /lists/{id}` rename | `PATCH /lists/{id}/rename` |
 | `PUT /lists/reorder` + `ordered_ids` | `PATCH /lists/{id}/reorder` + `{position: 1..5}` + каскад |
-| prefix `/api/v1` | prefix `/v1` (без `/api`) |
+| prefix `/api/v1` | ✅ `/api/v1` ([api_prefix_dev.md](../api_prefix_dev.md)) |
 | лимит списков → 409 | ✅ create → `409` |
 | `GET/POST /lists/{id}/tasks` | `GET/POST /tasks/` (`list_id` query/body); код в `tasks.py` + `TaskService` |
 | Подзадачи в MVP | **Снято** — post-MVP |
@@ -505,7 +505,7 @@ src/
 | Статус/список/view Abandoned | **Снято**; «не буду делать» = trash |
 | Restore списка | Нет; только задачи поштучно |
 | `previous_list_id` FK на lists | Без FK (hard delete списка) |
-| prefix `/api/v1` | `/v1` |
+| prefix `/api/v1` | `/api/v1` |
 | bulk reorder `ordered_ids` | per-list `PATCH .../reorder` + `position` (+ каскад) |
 | лимит списков → 403 | → `409` |
 | Подзадачи в MVP | **Снято** → post-MVP |

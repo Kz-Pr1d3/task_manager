@@ -4,10 +4,10 @@
 
 | Компонент | Статус | Заметки |
 |-----------|--------|---------|
-| `POST /auth/sign-up` | ✅ | access + refresh; refresh также в session cookie |
-| `POST /auth/sign-in` | ✅ | |
-| `POST /auth/refresh` | ✅ | body `RefreshRequest.refresh_token` |
-| `POST /auth/logout` | ✅ | revoke refresh в Redis + `session.clear()`, 204 |
+| `POST /api/v1/auth/sign-up` | ✅ | access + refresh; refresh также в session cookie |
+| `POST /api/v1/auth/sign-in` | ✅ | |
+| `POST /api/v1/auth/refresh` | ✅ | body `RefreshRequest.refresh_token` |
+| `POST /api/v1/auth/logout` | ✅ | revoke refresh в Redis + `session.clear()`, 204 |
 | JWT access (Bearer) | ✅ | `get_current_user_id` + RS256 keys |
 | Refresh в Redis | ✅ | `Security.store_refresh_token` |
 | SessionMiddleware | ✅ | cookie `SESSION_ID`, `same_site=strict`, `https_only=True` |
@@ -24,10 +24,10 @@
 
 | Endpoint | Метод | Статус | Описание | Вход | Выход |
 |----------|-------|--------|----------|------|-------|
-| `/auth/sign-up` | POST | ✅ | Регистрация | login (email), password | access + refresh (cookie) |
-| `/auth/sign-in` | POST | ✅ | Вход | login (email), password | access + refresh |
-| `/auth/refresh` | POST | ✅ | Обновление токенов | refresh (body) | новый access + новый refresh |
-| `/auth/logout` | POST | ✅ | Инвалидация сессии | refresh (body) | 204 |
+| `/api/v1/auth/sign-up` | POST | ✅ | Регистрация | login (email), password | access + refresh (cookie) |
+| `/api/v1/auth/sign-in` | POST | ✅ | Вход | login (email), password | access + refresh |
+| `/api/v1/auth/refresh` | POST | ✅ | Обновление токенов | refresh (body) | новый access + новый refresh |
+| `/api/v1/auth/logout` | POST | ✅ | Инвалидация сессии | refresh (body) | 204 |
 
 ## Middleware
 
@@ -41,8 +41,9 @@
 ```
 src/
 ├── api/
-│   ├── auth.py                 # роутер
-│   └── dependencies.py         # get_current_user_id
+│   ├── dependencies.py         # get_current_user_id
+│   └── v1/
+│       └── auth.py             # роутер `/api/v1/auth`
 ├── services/
 │   └── auth.py                 # бизнес-логика
 ├── repository/
@@ -61,11 +62,11 @@ src/
 | Токен | Где хранится | Передача |
 |-------|--------------|----------|
 | access | localStorage (фронт) | `Authorization: Bearer <token>` |
-| refresh | Redis (jti) + session cookie при sign-up/sign-in/refresh | body на `/auth/refresh` и `/auth/logout`; cookie `SESSION_ID` |
+| refresh | Redis (jti) + session cookie при sign-up/sign-in/refresh | body на `/api/v1/auth/refresh` и `/api/v1/auth/logout`; cookie `SESSION_ID` |
 
 ## TODO (дальнейшие шаги)
 
-- [x] Доделать `/auth/logout` — инвалидация refresh в Redis + очистка cookie
+- [x] Доделать `/api/v1/auth/logout` — инвалидация refresh в Redis + очистка cookie
 - [ ] Валидация пароля (минимум 8 символов, хотя бы одна цифра, хотя бы одна заглавная буква)
 - [ ] Rate limiting на auth endpoints (защита от брутфорса)
 - [ ] Email verification при регистрации

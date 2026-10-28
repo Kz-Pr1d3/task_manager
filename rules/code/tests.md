@@ -110,6 +110,7 @@ assert custom_list.position == 1
 | `core` | Юнит без I/O, прямые вызовы |
 | `api` | HTTP через `TestClient` |
 | `services` | Реальные/фикстурные зависимости; моки — исключение, см. выше |
+| `smoke` | Полный стек (nginx `:8080` + uvicorn + MinIO); маркер `@pytest.mark.smoke`; default `pytest` их исключает (`-m 'not smoke'`) |
 
 ## Чеклист перед коммитом теста
 

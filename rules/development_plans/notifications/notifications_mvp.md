@@ -192,7 +192,7 @@ class NotificationEvent(BaseModel):
 Правила:
 - `actor_id` вычитается из `recipient_ids` (для reminder `actor_id=None`);
 - пустой набор получателей — не ошибка;
-- `deep_link` только внутренний путь (`/v1/tasks/{id}` или `/tasks/{id}` — зафиксировать один стиль);
+- `deep_link` только путь фронта (`/tasks/{id}`), не API;
 - `emit` возвращает `set[int]` получателей, для которых реально вставилась строка → им publish.
 
 Репозиторий: `INSERT ... ON CONFLICT (event_id, recipient_id) DO NOTHING RETURNING recipient_id`.
@@ -250,17 +250,17 @@ WHERE due_date > now()
 
 ## HTTP API
 
-Префикс: `/v1/notifications` (как остальной API).  
+Префикс: `/api/v1/notifications` (как остальной API).  
 `recipient_id` всегда из `get_current_user_id`, никогда из body/query клиента.
 
 | Метод | Путь | Описание |
 |-------|------|----------|
-| GET | `/v1/notifications` | Список, cursor `before_id`, `limit`≤100, фильтры `unread` / `category` / `important` |
-| GET | `/v1/notifications/unread-count` | `total`, `important`, `by_category` |
-| POST | `/v1/notifications/read` | `{ "ids": [...] }` или `{ "all": true, "category"? }` |
-| POST | `/v1/notifications/unread` | `{ "ids": [...] }` |
-| POST | `/v1/notifications/sse-ticket` | Создаёт одноразовый ticket в Redis TTL ~30s |
-| GET | `/v1/notifications/stream` | SSE; auth через `ticket` query (`GETDEL`) |
+| GET | `/api/v1/notifications/` | Список, cursor `before_id`, `limit`≤100, фильтры `unread` / `category` / `important` |
+| GET | `/api/v1/notifications/unread-count` | `total`, `important`, `by_category` |
+| POST | `/api/v1/notifications/read` | `{ "ids": [...] }` или `{ "all": true, "category"? }` |
+| POST | `/api/v1/notifications/unread` | `{ "ids": [...] }` |
+| POST | `/api/v1/notifications/sse-ticket` | Создаёт одноразовый ticket в Redis TTL ~30s |
+| GET | `/api/v1/notifications/stream` | SSE; auth через `ticket` query (`GETDEL`) |
 
 После успешного commit `read` / `read-all` / `unread` — `publish` invalidate текущему пользователю (счётчик на других вкладках).
 
@@ -274,9 +274,9 @@ WHERE due_date > now()
 
 `EventSource` не шлёт `Authorization`. Схема:
 
-1. Клиент: `POST /v1/notifications/sse-ticket` с Bearer → `{ "ticket": "..." }`.
+1. Клиент: `POST /api/v1/notifications/sse-ticket` с Bearer → `{ "ticket": "..." }`.
 2. Backend: Redis `sse-ticket:{sha256(ticket)}` = `user_id`, TTL 30s.
-3. Клиент: `GET /v1/notifications/stream?ticket=...`.
+3. Клиент: `GET /api/v1/notifications/stream?ticket=...`.
 4. Endpoint: атомарный `GETDEL`, при отсутствии/истечении → 401.
 5. Подписка в `SSEHub`, событие `ready` с `retry: 3000`, далее `notification.invalidate` + keepalive.
 
@@ -369,7 +369,9 @@ Payload сигнала:
 
 #### Proxy notes (nginx)
 
-SSE — долгий ответ. Для `/v1/notifications/stream` выставь `proxy_buffering off`, `proxy_cache off`, `proxy_http_version 1.1`, `proxy_set_header Connection ""` и `proxy_read_timeout` существенно больше keepalive (например `1h`). FastAPI уже шлёт `X-Accel-Buffering: no`, но явная настройка nginx делает поведение предсказуемым.
+Реализация: [nginx_sse_dev.md](../nginx/nginx_sse_dev.md) (план, код ещё ❌).
+
+SSE — долгий ответ. Для `/api/v1/notifications/stream` выставь `proxy_buffering off`, `proxy_cache off`, `proxy_http_version 1.1`, `proxy_set_header Connection ""` и `proxy_read_timeout` существенно больше keepalive (например `1h`). FastAPI уже шлёт `X-Accel-Buffering: no`, но явная настройка nginx делает поведение предсказуемым.
 
 ---
 

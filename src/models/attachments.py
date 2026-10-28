@@ -51,7 +51,19 @@ class InitiateUploadResponse(BaseModel):
 
 
 class DownloadUrlResult(BaseModel):
-    """Presigned GET для редиректа на скачивание."""
+    """Presigned GET для редиректа на скачивание (режим ``presigned``)."""
 
     url: str
     expires_in: int
+
+
+class DownloadAccelResult(BaseModel):
+    """Заголовки X-Accel-Redirect для nginx (режим ``x_accel``)."""
+
+    x_accel_redirect: str
+    content_type: str
+    content_disposition: str
+    expires_in: int
+
+
+DownloadResult = DownloadUrlResult | DownloadAccelResult

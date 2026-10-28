@@ -4,6 +4,8 @@ from starlette.testclient import TestClient
 from src.core.keys import Keys
 from src.main import app
 
+API_PREFIX = "/api"
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _load_jwt_keys() -> None:

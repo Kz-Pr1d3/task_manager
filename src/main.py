@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 from starlette.middleware.sessions import SessionMiddleware
 
-from src.api.auth import auth_router
 from src.api.v1.router import v1_router
 from src.core import cache
 from src.core.config import configs
@@ -87,9 +86,12 @@ class AppCreator:
             title=configs.app_name,
             version="1.0.0",
             lifespan=lifespan,
+            docs_url="/api/docs",
+            redoc_url="/api/redoc",
+            openapi_url="/api/openapi.json",
+            swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
         )
 
-        self.app.include_router(router=auth_router)
         self.app.add_middleware(
             middleware_class=CORSMiddleware,
             allow_origins=["*"],
@@ -117,8 +119,7 @@ class AppCreator:
             metrics_app = make_asgi_app()
             self.app.mount("/metrics", metrics_app)
 
-        self.app.include_router(router=auth_router)
-        self.app.include_router(router=v1_router)
+        self.app.include_router(router=v1_router, prefix="/api")
 
 
 app_creator = AppCreator(lifespan=app_lifespan)

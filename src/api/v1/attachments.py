@@ -14,6 +14,7 @@ from src.api.responses import (
     UNPROCESSABLE,
 )
 from src.models.attachments import (
+    DownloadAccelResult,
     InitiateUploadRequest,
     InitiateUploadResponse,
     TaskAttachment,
@@ -121,10 +122,18 @@ async def complete_upload(
 @attachments_router.get(
     "/{attachment_id}/download",
     tags=["attachments"],
-    summary="Скачивание: 307 на presigned GET.",
-    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-    response_class=RedirectResponse,
-    responses={**NOT_FOUND, **CONFLICT},
+    summary="Скачивание: 307 presigned GET или 200 X-Accel-Redirect.",
+    response_model=None,
+    responses={
+        **NOT_FOUND,
+        **CONFLICT,
+        status.HTTP_200_OK: {
+            "description": "X-Accel (ATTACHMENT_DOWNLOAD_MODE=x_accel)",
+        },
+        status.HTTP_307_TEMPORARY_REDIRECT: {
+            "description": "Presigned GET (ATTACHMENT_DOWNLOAD_MODE=presigned)",
+        },
+    },
 )
 async def download_attachment(
         task_id: task_id_annotation,
@@ -133,19 +142,33 @@ async def download_attachment(
         service: AttachmentServiceDep,
 ):
     """
-    Редирект на короткоживущий presigned GET URL.
+    Скачивание ready-вложения.
+
+    - ``presigned``: ``307`` Location = presigned GET на S3 endpoint.
+    - ``x_accel``: ``200`` пустое тело + ``X-Accel-Redirect`` для nginx.
 
     :param task_id: идентификатор задачи.
     :param attachment_id: id ready-вложения.
     :param user_id: id из access-токена.
     :param service: сервис вложений.
-    :returns: ``307`` с Location = presigned URL.
+    :returns: ``RedirectResponse`` 307 или ``Response`` 200.
     """
     result = await service.get_download_url(
         user_id=user_id,
         task_id=task_id,
         attachment_id=attachment_id,
     )
+    if isinstance(result, DownloadAccelResult):
+        return Response(
+            status_code=status.HTTP_200_OK,
+            content=b"",
+            headers={
+                "X-Accel-Redirect": result.x_accel_redirect,
+                "Content-Type": result.content_type,
+                "Content-Disposition": result.content_disposition,
+                "Cache-Control": "no-store",
+            },
+        )
     return RedirectResponse(
         url=result.url,
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,

@@ -62,3 +62,7 @@ miniodata/
 
 # Local Junie plans
 .junie/
+
+# Office / PDF drafts
+*.pdf
+*.docx
